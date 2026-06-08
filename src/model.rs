@@ -43,6 +43,7 @@ pub enum InterfaceStatus {
 pub struct InterfaceAddress {
     pub value: String,
     pub prefix_len: Option<u8>,
+    pub gateway: Option<String>,
 }
 
 impl InterfaceAddress {
@@ -50,6 +51,7 @@ impl InterfaceAddress {
         Self {
             value: value.to_string(),
             prefix_len: None,
+            gateway: None,
         }
     }
 }

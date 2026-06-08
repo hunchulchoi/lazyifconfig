@@ -82,3 +82,43 @@ fn merges_stats_into_interface_records() {
         })
     );
 }
+
+#[test]
+fn test_network_classification_priority() {
+    // utun은 사설 IP가 있어도 VPN으로 분류되어야 함
+    let input = "utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1500\n\tinet 10.8.0.2 netmask 0xffffff00";
+    let parsed = parse_interfaces(input);
+    assert_eq!(parsed[0].network_kind, lazyifconfig::model::NetworkKind::Vpn);
+
+    // en0에 사설 IP가 있으면 LAN
+    let input2 = "en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n\tinet 192.168.0.15 netmask 0xffffff00";
+    let parsed2 = parse_interfaces(input2);
+    assert_eq!(parsed2[0].network_kind, lazyifconfig::model::NetworkKind::Lan);
+}
+
+#[test]
+fn test_gateway_parsing() {
+    let input = "utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380\n\tinet 10.10.0.2 --> 10.10.0.1 netmask 0xffffffff";
+    let interfaces = parse_interfaces(input);
+    assert_eq!(interfaces[0].ipv4[0].gateway, Some("10.10.0.1".to_string()));
+
+    let netstat_input = "Routing tables\n\nInternet:\nDestination        Gateway            Flags               Netif\ndefault            192.168.0.1        UGScg                 en0";
+    let en0 = lazyifconfig::model::NetworkInterface {
+        name: "en0".to_string(),
+        network_kind: lazyifconfig::model::NetworkKind::Lan,
+        interface_type: lazyifconfig::model::InterfaceType::WifiOrEthernet,
+        status: lazyifconfig::model::InterfaceStatus::Up,
+        ipv4: vec![lazyifconfig::model::InterfaceAddress {
+            value: "192.168.0.15".to_string(),
+            prefix_len: Some(24),
+            gateway: None,
+        }],
+        ipv6: vec![],
+        mac_address: None,
+        mtu: None,
+        stats: None,
+    };
+    let mut interfaces2 = vec![en0];
+    lazyifconfig::collector::interface::merge_gateways(&mut interfaces2, netstat_input);
+    assert_eq!(interfaces2[0].ipv4[0].gateway, Some("192.168.0.1".to_string()));
+}
