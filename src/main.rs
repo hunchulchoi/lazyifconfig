@@ -58,26 +58,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Char('q') => break,
-                    KeyCode::Char('r') => {
+                    KeyCode::Char('q') | KeyCode::Char('ㅂ') => break,
+                    KeyCode::Char('r') | KeyCode::Char('ㄱ') => {
                         let _ = tick_update(&mut app);
                         last_tick = std::time::Instant::now();
                     }
-                    KeyCode::Char('j') | KeyCode::Down => {
+                    KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('ㅓ') => {
                         app.select_next();
                     }
-                    KeyCode::Char('k') | KeyCode::Up => {
+                    KeyCode::Char('k') | KeyCode::Up | KeyCode::Char('ㅏ') => {
                         app.select_previous();
                     }
-                    KeyCode::Char('a') => {
+                    KeyCode::Char('a') | KeyCode::Char('ㅁ') => {
                         app.show_all = !app.show_all;
                         let _ = tick_update(&mut app);
                         last_tick = std::time::Instant::now();
                     }
-                    KeyCode::Char('i') => {
+                    KeyCode::Char('i') | KeyCode::Char('ㅑ') => {
                         app.set_view_mode(ViewMode::Interface);
                     }
-                    KeyCode::Char('n') => {
+                    KeyCode::Char('n') | KeyCode::Char('ㅜ') => {
                         app.set_view_mode(ViewMode::Network);
                     }
                     _ => {}
