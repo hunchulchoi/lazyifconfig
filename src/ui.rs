@@ -1,6 +1,7 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Sparkline, Wrap},
     Frame,
 };
@@ -341,7 +342,29 @@ pub fn draw(frame: &mut Frame, app: &App) {
                     }
                 }
 
-                let details_p = Paragraph::new(details_text)
+                let mut ui_lines = Vec::new();
+                let mut in_whois_section = false;
+                for line in details_text.lines() {
+                    if line.contains("=== Whois Information ===") {
+                        in_whois_section = true;
+                    }
+                    
+                    let is_highlight = in_whois_section && {
+                        let lower = line.to_lowercase();
+                        lower.contains("origin") || lower.contains("org")
+                    };
+                    
+                    if is_highlight {
+                        ui_lines.push(Line::from(Span::styled(
+                            line.to_string(),
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                        )));
+                    } else {
+                        ui_lines.push(Line::from(line.to_string()));
+                    }
+                }
+
+                let details_p = Paragraph::new(ui_lines)
                     .wrap(Wrap { trim: true })
                     .scroll((app.details_scroll, 0));
                 frame.render_widget(details_p, details_inner);
