@@ -121,6 +121,7 @@ fn replace_snapshot_emits_disappearance_event() {
 #[test]
 fn replace_snapshot_emits_status_change_event() {
     let mut app = App::default();
+    app.show_all = true;
 
     app.replace_snapshot(snapshot_with_interfaces(
         10,

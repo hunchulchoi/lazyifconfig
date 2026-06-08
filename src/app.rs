@@ -12,7 +12,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn replace_snapshot(&mut self, snapshot: NetworkSnapshot) {
+    pub fn replace_snapshot(&mut self, mut snapshot: NetworkSnapshot) {
+        if !self.show_all {
+            snapshot.interfaces.retain(|interface| interface.status == crate::model::InterfaceStatus::Up);
+        }
+
         let selected_name = self.selected_interface_name().map(str::to_owned);
 
         if let Some(previous) = self.current_snapshot.replace(snapshot) {

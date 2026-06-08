@@ -1,9 +1,6 @@
-pub fn run_ifconfig(show_all: bool) -> Result<String, String> {
+pub fn run_ifconfig(_show_all: bool) -> Result<String, String> {
     use std::process::Command;
     let mut cmd = Command::new("ifconfig");
-    if !show_all {
-        cmd.arg("-u");
-    }
     let output = cmd.output().map_err(|e| e.to_string())?;
 
     if output.status.success() {
