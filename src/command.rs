@@ -36,6 +36,19 @@ pub fn run_netstat_an() -> Result<String, String> {
     }
 }
 
+pub fn run_netstat_ib() -> Result<String, String> {
+    use std::process::Command;
+    let mut cmd = Command::new("netstat");
+    cmd.arg("-ib");
+    let output = cmd.output().map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        String::from_utf8(output.stdout).map_err(|e| e.to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +80,13 @@ mod tests {
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("tcp") || output.contains("udp") || output.contains("LISTEN") || output.contains("Local Address"));
+    }
+
+    #[test]
+    fn test_run_netstat_ib_success() {
+        let result = run_netstat_ib();
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.contains("Name") && output.contains("Ibytes") && output.contains("Obytes"));
     }
 }

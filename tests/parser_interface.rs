@@ -157,3 +157,33 @@ udp4       0      0  *.5353                 *.*
     assert_eq!(c2.foreign_port, "*");
     assert_eq!(c2.state, None);
 }
+
+#[test]
+fn test_merge_stats_from_netstat_ib() {
+    let netstat_input = "\
+Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll
+lo0        16384 <Link#1>                       2457315     0 1256093331  2457315     0 1256093331     0
+en0        1500  <Link#14>   32:f7:1c:75:c4:c5 11885040     0 9178588284  9544740     0 4905232533     0
+gif0*      1280  <Link#2>                             0     0          0        0     0          0     0
+";
+    let en0 = lazyifconfig::model::NetworkInterface {
+        name: "en0".to_string(),
+        network_kind: lazyifconfig::model::NetworkKind::Lan,
+        interface_type: lazyifconfig::model::InterfaceType::WifiOrEthernet,
+        status: lazyifconfig::model::InterfaceStatus::Up,
+        ipv4: vec![],
+        ipv6: vec![],
+        mac_address: None,
+        mtu: None,
+        stats: None,
+    };
+    let interfaces = vec![en0];
+    let merged = merge_stats(netstat_input, interfaces);
+    let en0_res = &merged[0];
+    assert!(en0_res.stats.is_some());
+    let stats = en0_res.stats.as_ref().unwrap();
+    assert_eq!(stats.rx_packets, 11885040);
+    assert_eq!(stats.rx_bytes, 9178588284);
+    assert_eq!(stats.tx_packets, 9544740);
+    assert_eq!(stats.tx_bytes, 4905232533);
+}

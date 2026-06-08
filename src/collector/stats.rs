@@ -38,7 +38,11 @@ pub fn parse_stats(input: &str) -> HashMap<String, InterfaceStats> {
 }
 
 pub fn merge_stats(input: &str, mut interfaces: Vec<NetworkInterface>) -> Vec<NetworkInterface> {
-    let stats_by_name = parse_stats(input);
+    let stats_by_name = if input.contains("Ibytes") && input.contains("Obytes") {
+        parse_netstat_ib(input)
+    } else {
+        parse_stats(input)
+    };
 
     for interface in &mut interfaces {
         if let Some(stats) = stats_by_name.get(&interface.name) {
@@ -47,6 +51,54 @@ pub fn merge_stats(input: &str, mut interfaces: Vec<NetworkInterface>) -> Vec<Ne
     }
 
     interfaces
+}
+
+fn parse_netstat_ib(input: &str) -> HashMap<String, InterfaceStats> {
+    let mut stats_by_name: HashMap<String, InterfaceStats> = HashMap::new();
+
+    for line in input.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 10 {
+            continue;
+        }
+
+        // We only care about Link-level stats row, which has `<Link#` in the Network column (parts[2])
+        if !parts[2].starts_with("<Link#") {
+            continue;
+        }
+
+        let name = parts[0].trim_end_matches('*').to_string();
+        let len = parts.len();
+
+        let rx_packets = match parts[len - 7].parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let rx_bytes = match parts[len - 5].parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let tx_packets = match parts[len - 4].parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let tx_bytes = match parts[len - 2].parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        stats_by_name.insert(
+            name,
+            InterfaceStats {
+                rx_packets,
+                rx_bytes,
+                tx_packets,
+                tx_bytes,
+            },
+        );
+    }
+
+    stats_by_name
 }
 
 fn is_interface_header(line: &str) -> bool {

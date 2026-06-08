@@ -7,7 +7,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use lazyifconfig::app::{App, ViewMode};
-use lazyifconfig::command::{run_ifconfig, run_netstat, run_netstat_an};
+use lazyifconfig::command::{run_ifconfig, run_netstat, run_netstat_an, run_netstat_ib};
 use lazyifconfig::collector::interface::{parse_interfaces, merge_gateways};
 use lazyifconfig::collector::stats::merge_stats;
 use lazyifconfig::collector::connections::parse_connections;
@@ -21,7 +21,8 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
         merge_gateways(&mut parsed, &netstat_out);
     }
     
-    let merged = merge_stats(&raw_out, parsed);
+    let stats_out = run_netstat_ib().unwrap_or_else(|_| raw_out.clone());
+    let merged = merge_stats(&stats_out, parsed);
 
     let connections = if let Ok(netstat_an_out) = run_netstat_an() {
         parse_connections(&netstat_an_out)
