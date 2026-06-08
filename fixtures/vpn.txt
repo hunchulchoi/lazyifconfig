@@ -1,0 +1,6 @@
+utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
+    inet6 fe80::abcd%utun4 prefixlen 64 scopeid 0x12
+    inet 10.10.0.2 --> 10.10.0.2 netmask 0xffffffff
+    status: active
+    RX packets 20 bytes 2048
+    TX packets 25 bytes 3072

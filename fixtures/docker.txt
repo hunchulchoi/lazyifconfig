@@ -1,0 +1,13 @@
+bridge0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+    ether de:ad:be:ef:00:01
+    inet 172.18.0.1 netmask 0xffff0000 broadcast 172.18.255.255
+    status: active
+    RX packets 30 bytes 3000
+    TX packets 30 bytes 3000
+awdl0: flags=8943<UP,BROADCAST,RUNNING,PROMISC,SIMPLEX,MULTICAST> mtu 1484
+    ether 12:34:56:78:9a:bc
+    inet6 fe80::beef%awdl0 prefixlen 64 scopeid 0x16
+    status: active
+mystery0: flags=8822<BROADCAST,SMART,SIMPLEX,MULTICAST> mtu 1500
+    ether 00:11:22:33:44:55
+    inet 192.0.2.10 netmask 0xffffff00 broadcast 192.0.2.255
