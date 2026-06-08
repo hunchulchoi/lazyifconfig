@@ -6,15 +6,20 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use lazyifconfig::app::App;
-use lazyifconfig::command::run_ifconfig;
-use lazyifconfig::collector::interface::parse_interfaces;
+use lazyifconfig::app::{App, ViewMode};
+use lazyifconfig::command::{run_ifconfig, run_netstat};
+use lazyifconfig::collector::interface::{parse_interfaces, merge_gateways};
 use lazyifconfig::collector::stats::merge_stats;
 use lazyifconfig::model::NetworkSnapshot;
 
 pub fn tick_update(app: &mut App) -> Result<(), String> {
     let raw_out = run_ifconfig(app.show_all)?;
-    let parsed = parse_interfaces(&raw_out);
+    let mut parsed = parse_interfaces(&raw_out);
+    
+    if let Ok(netstat_out) = run_netstat() {
+        merge_gateways(&mut parsed, &netstat_out);
+    }
+    
     let merged = merge_stats(&raw_out, parsed);
     
     let now = SystemTime::now()
@@ -69,6 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = tick_update(&mut app);
                         last_tick = std::time::Instant::now();
                     }
+                    KeyCode::Char('i') => {
+                        app.set_view_mode(ViewMode::Interface);
+                    }
+                    KeyCode::Char('n') => {
+                        app.set_view_mode(ViewMode::Network);
+                    }
                     _ => {}
                 }
             }
@@ -99,4 +110,3 @@ mod tests {
         assert!(app.current_snapshot.is_some());
     }
 }
-

@@ -10,6 +10,19 @@ pub fn run_ifconfig(_show_all: bool) -> Result<String, String> {
     }
 }
 
+pub fn run_netstat() -> Result<String, String> {
+    use std::process::Command;
+    let mut cmd = Command::new("netstat");
+    cmd.arg("-rn");
+    let output = cmd.output().map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        String::from_utf8(output.stdout).map_err(|e| e.to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -25,5 +38,13 @@ mod tests {
         assert!(result_all.is_ok());
         let output_all = result_all.unwrap();
         assert!(output_all.contains("lo0") || output_all.contains("en0"));
+    }
+
+    #[test]
+    fn test_run_netstat_success() {
+        let result = run_netstat();
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.contains("Routing tables") || output.contains("default"));
     }
 }
