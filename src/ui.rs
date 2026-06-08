@@ -39,11 +39,18 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 InterfaceStatus::Down => "○",
             };
             let ip = interface.ipv4.first().map(|addr| addr.value.as_str()).unwrap_or("no IP");
-            let style = if idx == app.selected_index {
+            let mut style = if idx == app.selected_index {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
+            if interface.status == InterfaceStatus::Down {
+                if idx == app.selected_index {
+                    style = style.add_modifier(Modifier::DIM);
+                } else {
+                    style = style.fg(Color::DarkGray);
+                }
+            }
             list_items.push(ListItem::new(format!("{} {} ({})", status_indicator, interface.name, ip)).style(style));
         }
     }
