@@ -471,3 +471,49 @@ fn test_routes_navigation() {
     assert_eq!(app.selected_index, 0);
 }
 
+#[test]
+fn test_raw_viewer_search_highlights() {
+    let mut app = App::default();
+    let source_id = lazyifconfig::model::CommandSourceId::Ifconfig;
+    
+    let stdout = "en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n\
+                  ether aa:bb:cc:dd:ee:ff\n\
+                  inet 192.168.1.12 netmask 0xffffff00 broadcast 192.168.1.255\n\
+                  한글 테스트 문장입니다. test line with unicode.";
+    let stderr = "some error message";
+    
+    app.command_outputs.insert(source_id, lazyifconfig::model::CommandOutput {
+        command: "ifconfig".to_string(),
+        stdout: stdout.to_string(),
+        stderr: stderr.to_string(),
+        executed_at: std::time::SystemTime::now(),
+        exit_code: Some(0),
+    });
+    
+    app.raw_viewer.sources = vec![source_id];
+    app.raw_viewer.selected_index = 0;
+    
+    // Search query: "inet" (case-insensitive test)
+    app.raw_viewer.search_query = "iNeT".to_string();
+    app.update_raw_viewer_search_matches();
+    
+    assert_eq!(app.raw_viewer.search_matches.len(), 1);
+    assert_eq!(app.raw_viewer.search_matches[0].line_index, 2);
+    assert_eq!(app.raw_viewer.search_matches[0].start_byte, 0);
+    assert_eq!(app.raw_viewer.search_matches[0].end_byte, 4);
+    
+    // Unicode search test
+    app.raw_viewer.search_query = "테스트".to_string();
+    app.update_raw_viewer_search_matches();
+    assert_eq!(app.raw_viewer.search_matches.len(), 1);
+    assert_eq!(app.raw_viewer.search_matches[0].line_index, 3);
+    
+    let text = format!("{}\n{}", stdout, stderr);
+    let line_content = text.lines().nth(3).unwrap();
+    let m = app.raw_viewer.search_matches[0];
+    assert!(line_content.is_char_boundary(m.start_byte));
+    assert!(line_content.is_char_boundary(m.end_byte));
+    assert_eq!(&line_content[m.start_byte..m.end_byte], "테스트");
+}
+
+

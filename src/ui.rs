@@ -1,8 +1,8 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Sparkline, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Sparkline, Wrap},
     Frame,
 };
 use crate::app::{App, NavigationItem, ViewMode};
@@ -644,24 +644,24 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let status_idx = if filter_bar_height > 0 { 3 } else { 2 };
     let status_text = match app.view_mode {
         ViewMode::Connections => {
-            " q: Quit | c: Copy IP | w: WHOIS | [/]: Scroll | i: Interface | n: Network | p: Ports | e: Timeline | g: Routes | j/k: Nav ".to_string()
+            " q: Quit | c: Copy IP | w: WHOIS | o: Raw Output | [/]: Scroll | i: Interface | n: Network | p: Ports | e: Timeline | g: Routes | j/k: Nav ".to_string()
         }
         ViewMode::Ports => {
             if app.port_filter_active {
                 " Type to filter | Enter: confirm | Esc: clear | Backspace: delete ".to_string()
             } else {
-                " q: Quit | f: Filter | K: Kill PID | r: Refresh | [/]: Scroll | i/n/c/e/g: Switch View | j/k: Nav ".to_string()
+                " q: Quit | f: Filter | K: Kill PID | r: Refresh | o: Raw Output | [/]: Scroll | i/n/c/e/g: Switch View | j/k: Nav ".to_string()
             }
         }
         ViewMode::Timeline => {
-            " q: Quit | [/]: Scroll | i: Interface | n: Network | c: Connections | p: Ports | g: Routes | j/k: Nav ".to_string()
+            " q: Quit | o: Raw Output | [/]: Scroll | i: Interface | n: Network | c: Connections | p: Ports | g: Routes | j/k: Nav ".to_string()
         }
         ViewMode::Routes => {
-            " q: Quit | [/]: Scroll | i: Interface | n: Network | c: Connections | p: Ports | e: Timeline | j/k: Nav ".to_string()
+            " q: Quit | o: Raw Output | [/]: Scroll | i: Interface | n: Network | c: Connections | p: Ports | e: Timeline | j/k: Nav ".to_string()
         }
         _ => {
             format!(
-                " q: Quit | r: Refresh | a: Toggle -a ({}) | i: Interface | n: Network | c: Connections | p: Ports | e: Timeline | g: Routes | j/k: Nav ",
+                " q: Quit | r: Refresh | a: Toggle -a ({}) | o: Raw Output | i: Interface | n: Network | c: Connections | p: Ports | e: Timeline | g: Routes | j/k: Nav ",
                 if app.show_all { "ON" } else { "OFF" }
             )
         }
@@ -669,7 +669,197 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let status_p = Paragraph::new(status_text)
         .style(Style::default().bg(Color::Blue).fg(Color::White));
     frame.render_widget(status_p, chunks[status_idx]);
+
+    if app.raw_viewer.active {
+        draw_raw_viewer(frame, app);
+    }
 }
+
+fn get_centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+fn build_matched_line<'a>(line: &'a str, matches_in_line: &[&crate::app::SearchMatch], text_color: Color, highlight_color: Color) -> Line<'a> {
+    let mut spans = Vec::new();
+    let mut last_idx = 0;
+
+    for m in matches_in_line {
+        if line.is_char_boundary(m.start_byte) && line.is_char_boundary(m.end_byte) {
+            if m.start_byte > last_idx && line.is_char_boundary(last_idx) {
+                spans.push(Span::styled(&line[last_idx..m.start_byte], Style::default().fg(text_color)));
+            }
+            spans.push(Span::styled(
+                &line[m.start_byte..m.end_byte],
+                Style::default().fg(Color::Black).bg(highlight_color).add_modifier(Modifier::BOLD)
+            ));
+            last_idx = m.end_byte;
+        }
+    }
+
+    if last_idx < line.len() && line.is_char_boundary(last_idx) {
+        spans.push(Span::styled(&line[last_idx..], Style::default().fg(text_color)));
+    }
+
+    Line::from(spans)
+}
+
+fn draw_raw_viewer(frame: &mut Frame, app: &App) {
+    let area = if frame.size().width < 80 || frame.size().height < 24 {
+        frame.size()
+    } else {
+        get_centered_rect(80, 85, frame.size())
+    };
+
+    frame.render_widget(Clear, area);
+
+    let main_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(68, 68, 68)))
+        .style(Style::default().bg(Color::Rgb(0, 0, 0)));
+    frame.render_widget(main_block, area);
+
+    // Inner area for contents
+    let inner_area = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
+
+    let vertical_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Tabs
+            Constraint::Length(1), // Separator line
+            Constraint::Min(3),    // Content
+            Constraint::Length(1), // Status Bar / Search Bar
+        ])
+        .split(inner_area);
+
+    // 1. Sources Tab Bar
+    let mut tab_spans = vec![Span::styled("Sources: ", Style::default().fg(Color::DarkGray))];
+    for (i, src) in app.raw_viewer.sources.iter().enumerate() {
+        if i > 0 {
+            tab_spans.push(Span::styled("  |  ", Style::default().fg(Color::DarkGray)));
+        }
+        let style = if i == app.raw_viewer.selected_index {
+            Style::default().bg(Color::Rgb(0, 255, 102)).fg(Color::Black).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Rgb(192, 255, 192))
+        };
+        tab_spans.push(Span::styled(format!(" {} ", src.as_str()), style));
+    }
+    let tab_p = Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(Color::Rgb(0, 0, 0)));
+    frame.render_widget(tab_p, vertical_chunks[0]);
+
+    // 2. Separator Line
+    let separator_text = "─".repeat(inner_area.width as usize);
+    let separator_p = Paragraph::new(separator_text).style(Style::default().fg(Color::Rgb(68, 68, 68)).bg(Color::Rgb(0, 0, 0)));
+    frame.render_widget(separator_p, vertical_chunks[1]);
+
+    // 3. Command Output Content
+    let source_id = app.raw_viewer.sources.get(app.raw_viewer.selected_index);
+    let mut lines = Vec::new();
+    let mut text_store = String::new();
+
+    if let Some(&src) = source_id {
+        if let Some(output) = app.command_outputs.get(&src) {
+            // Command prompt
+            lines.push(Line::from(vec![
+                Span::styled("$ ", Style::default().fg(Color::Rgb(0, 255, 102)).add_modifier(Modifier::BOLD)),
+                Span::styled(&output.command, Style::default().fg(Color::Rgb(0, 255, 102)).add_modifier(Modifier::BOLD)),
+            ]));
+
+            // Timestamp and Exit Code
+            let local_time: DateTime<Local> = output.executed_at.into();
+            let time_str = local_time.format("%Y-%m-%d %H:%M:%S").to_string();
+            let exit_str = match output.exit_code {
+                Some(code) => code.to_string(),
+                None => "None".to_string(),
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("Executed: {}  |  Exit Code: ", time_str), Style::default().fg(Color::Rgb(128, 128, 128))),
+                Span::styled(
+                    exit_str,
+                    Style::default().fg(if output.exit_code == Some(0) { Color::Rgb(0, 255, 102) } else { Color::Rgb(255, 102, 102) })
+                ),
+            ]));
+            lines.push(Line::raw(""));
+
+            // Combined output text
+            text_store.push_str(&output.stdout);
+            text_store.push('\n');
+            text_store.push_str(&output.stderr);
+            let text_color = if output.exit_code == Some(0) { Color::Rgb(192, 255, 192) } else { Color::Rgb(255, 102, 102) };
+            let highlight_color = Color::Rgb(255, 204, 0);
+
+            for (line_idx, line) in text_store.lines().enumerate() {
+                let matches_in_line: Vec<&crate::app::SearchMatch> = app.raw_viewer.search_matches
+                    .iter()
+                    .filter(|m| m.line_index == line_idx)
+                    .collect();
+
+                if matches_in_line.is_empty() {
+                    lines.push(Line::styled(line, Style::default().fg(text_color)));
+                } else {
+                    lines.push(build_matched_line(line, &matches_in_line, text_color, highlight_color));
+                }
+            }
+        } else {
+            lines.push(Line::styled("Command execution history not found.", Style::default().fg(Color::Rgb(255, 102, 102))));
+        }
+    } else {
+        lines.push(Line::styled("No source selected.", Style::default().fg(Color::Rgb(255, 102, 102))));
+    }
+
+    let lines_count = lines.len();
+    let content_height = vertical_chunks[2].height as usize;
+    let max_scroll = lines_count.saturating_sub(content_height) as u16;
+    let render_scroll = app.raw_viewer.scroll.min(max_scroll);
+
+    let content_p = Paragraph::new(lines)
+        .style(Style::default().bg(Color::Rgb(0, 0, 0)))
+        .scroll((render_scroll, 0));
+    frame.render_widget(content_p, vertical_chunks[2]);
+
+    // 4. Status Bar / Search Prompt
+    let status_line = if app.raw_viewer.search_active {
+        Line::from(vec![
+            Span::styled("Search: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(&app.raw_viewer.search_query, Style::default().fg(Color::White)),
+            Span::styled("█", Style::default().fg(Color::Yellow)),
+        ])
+    } else if !app.raw_viewer.search_query.is_empty() {
+        let current = if app.raw_viewer.search_matches.is_empty() { 0 } else { app.raw_viewer.current_match_index + 1 };
+        let total = app.raw_viewer.search_matches.len();
+        Line::from(vec![
+            Span::styled("Search: ", Style::default().fg(Color::Yellow)),
+            Span::styled(format!("{} ({} / {})  -  n: Next, N: Prev  |  ", app.raw_viewer.search_query, current, total), Style::default().fg(Color::White)),
+            Span::styled("Esc/q/o: Close | Tab: Next Src | y: Copy Cmd | Y: Copy Output", Style::default().fg(Color::Gray)),
+        ])
+    } else {
+        Line::from(Span::styled(
+            "Esc/q/o: Close | Tab: Next Src | y: Copy Cmd | Y: Copy Output | /: Search",
+            Style::default().fg(Color::Rgb(180, 180, 180))
+        ))
+    };
+
+    let status_p = Paragraph::new(status_line)
+        .style(Style::default().bg(Color::Rgb(30, 30, 30)));
+    frame.render_widget(status_p, vertical_chunks[3]);
+}
+
 
 fn prefix_len_to_ipv4_mask(prefix_len: u8) -> String {
     let mask = if prefix_len == 0 {
