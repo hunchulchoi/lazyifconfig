@@ -13,6 +13,16 @@ pub fn render_title() -> &'static str {
     "lazyifconfig"
 }
 
+fn get_active_command(view_mode: ViewMode) -> &'static str {
+    match view_mode {
+        ViewMode::Interface | ViewMode::Network => "ifconfig",
+        ViewMode::Connections => "netstat -an",
+        ViewMode::Ports => "lsof -iTCP -sTCP:LISTEN -P -n",
+        ViewMode::Routes => "netstat -rn",
+        ViewMode::Timeline => "event-logger",
+    }
+}
+
 pub fn draw(frame: &mut Frame, app: &App) {
     // When in port filter mode, allocate an extra line for the filter bar
     let filter_bar_height: u16 = if app.port_filter_active || (app.view_mode == ViewMode::Ports && !app.port_filter.is_empty()) { 1 } else { 0 };
@@ -969,5 +979,15 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| draw(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_get_active_command() {
+        assert_eq!(get_active_command(ViewMode::Interface), "ifconfig");
+        assert_eq!(get_active_command(ViewMode::Network), "ifconfig");
+        assert_eq!(get_active_command(ViewMode::Connections), "netstat -an");
+        assert_eq!(get_active_command(ViewMode::Ports), "lsof -iTCP -sTCP:LISTEN -P -n");
+        assert_eq!(get_active_command(ViewMode::Routes), "netstat -rn");
+        assert_eq!(get_active_command(ViewMode::Timeline), "event-logger");
     }
 }
