@@ -74,6 +74,7 @@ pub struct App {
     pub last_public_ip_fetch: Option<std::time::Instant>,
     pub command_outputs: HashMap<CommandSourceId, CommandOutput>,
     pub raw_viewer: RawViewerState,
+    pub help_visible: bool,
     pub async_command_outputs: std::sync::Arc<std::sync::Mutex<HashMap<CommandSourceId, CommandOutput>>>,
 }
 
@@ -116,6 +117,7 @@ impl Default for App {
             last_public_ip_fetch: None,
             command_outputs: HashMap::new(),
             raw_viewer: RawViewerState::default(),
+            help_visible: false,
             async_command_outputs: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }

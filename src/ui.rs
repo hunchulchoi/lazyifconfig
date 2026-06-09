@@ -23,6 +23,33 @@ fn get_active_command(view_mode: ViewMode) -> &'static str {
     }
 }
 
+fn get_status_text(app: &App) -> String {
+    match app.view_mode {
+        ViewMode::Connections => {
+            " q quit | c copy | w whois | [/]: scroll | i/n/p/e/g view | j/k nav ".to_string()
+        }
+        ViewMode::Ports => {
+            if app.port_filter_active {
+                " filter: type | Enter apply | Esc clear | Backspace delete ".to_string()
+            } else {
+                " q quit | f filter | K kill | r refresh | [/]: scroll | i/n/c/e/g view | j/k nav ".to_string()
+            }
+        }
+        ViewMode::Timeline => {
+            " q quit | [/]: scroll | i/n/c/p/g view | j/k nav ".to_string()
+        }
+        ViewMode::Routes => {
+            " q quit | [/]: scroll | i/n/c/p/e view | j/k nav ".to_string()
+        }
+        _ => {
+            format!(
+                " q quit | r refresh | a all:{} | i/n/c/p/e/g view | j/k nav ",
+                if app.show_all { "on" } else { "off" }
+            )
+        }
+    }
+}
+
 pub fn draw(frame: &mut Frame, app: &App) {
     // When in port filter mode, allocate an extra line for the filter bar
     let filter_bar_height: u16 = if app.port_filter_active || (app.view_mode == ViewMode::Ports && !app.port_filter.is_empty()) { 1 } else { 0 };
@@ -619,6 +646,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let command_line = Line::from(vec![
         Span::styled("$ ", Style::default().fg(Color::Rgb(0, 255, 102)).add_modifier(Modifier::BOLD)),
         Span::styled(command_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::raw("   "),
+        Span::styled("o[output]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw(" "),
+        Span::styled("?[help]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
     ]);
     let command_p = Paragraph::new(command_line);
     frame.render_widget(command_p, chunks[1]);
@@ -662,37 +693,42 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // 6. Status Bar
     let status_idx = 4;
-    let status_text = match app.view_mode {
-        ViewMode::Connections => {
-            " q: Quit | c: Copy IP | w: WHOIS | o: Raw Output | [/]: Scroll | i: Interface | n: Network | p: Ports | e: Timeline | g: Routes | j/k: Nav ".to_string()
-        }
-        ViewMode::Ports => {
-            if app.port_filter_active {
-                " Type to filter | Enter: confirm | Esc: clear | Backspace: delete ".to_string()
-            } else {
-                " q: Quit | f: Filter | K: Kill PID | r: Refresh | o: Raw Output | [/]: Scroll | i/n/c/e/g: Switch View | j/k: Nav ".to_string()
-            }
-        }
-        ViewMode::Timeline => {
-            " q: Quit | o: Raw Output | [/]: Scroll | i: Interface | n: Network | c: Connections | p: Ports | g: Routes | j/k: Nav ".to_string()
-        }
-        ViewMode::Routes => {
-            " q: Quit | o: Raw Output | [/]: Scroll | i: Interface | n: Network | c: Connections | p: Ports | e: Timeline | j/k: Nav ".to_string()
-        }
-        _ => {
-            format!(
-                " q: Quit | r: Refresh | a: Toggle -a ({}) | o: Raw Output | i: Interface | n: Network | c: Connections | p: Ports | e: Timeline | g: Routes | j/k: Nav ",
-                if app.show_all { "ON" } else { "OFF" }
-            )
-        }
-    };
+    let status_text = get_status_text(app);
     let status_p = Paragraph::new(status_text)
         .style(Style::default().bg(Color::Blue).fg(Color::White));
     frame.render_widget(status_p, chunks[status_idx]);
 
+    if app.help_visible {
+        draw_help(frame);
+    }
+
     if app.raw_viewer.active {
         draw_raw_viewer(frame, app);
     }
+}
+
+fn draw_help(frame: &mut Frame) {
+    let area = get_centered_rect(54, 42, frame.size());
+    let block = Block::default()
+        .title(" Help ")
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black).fg(Color::White));
+    let inner = block.inner(area);
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+
+    let lines = vec![
+        Line::from("q quit    r refresh    a all interfaces"),
+        Line::from("i interface  n network  c connections"),
+        Line::from("p ports      e timeline g routes"),
+        Line::from("o raw output ? help     Esc close"),
+        Line::from("j/k or arrows move      [/]: details scroll"),
+    ];
+    let help = Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(Color::Black).fg(Color::White));
+    frame.render_widget(help, inner);
 }
 
 fn get_centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -999,5 +1035,45 @@ mod tests {
         assert_eq!(get_active_command(ViewMode::Ports), "lsof -iTCP -sTCP:LISTEN -P -n");
         assert_eq!(get_active_command(ViewMode::Routes), "netstat -rn");
         assert_eq!(get_active_command(ViewMode::Timeline), "event-logger");
+    }
+
+    #[test]
+    fn test_command_line_shows_output_and_help_hints() {
+        let app = App::default();
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("o[output]"));
+        assert!(rendered.contains("?[help]"));
+    }
+
+    #[test]
+    fn test_status_text_is_compact_without_raw_output_hint() {
+        let modes = [
+            ViewMode::Interface,
+            ViewMode::Network,
+            ViewMode::Connections,
+            ViewMode::Ports,
+            ViewMode::Timeline,
+            ViewMode::Routes,
+        ];
+
+        for mode in modes {
+            let mut app = App::default();
+            app.view_mode = mode;
+            let status = get_status_text(&app);
+
+            assert!(!status.contains("Raw Output"));
+            assert!(status.len() <= 90, "status too long for {:?}: {}", mode, status);
+        }
     }
 }

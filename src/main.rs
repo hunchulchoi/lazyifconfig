@@ -346,7 +346,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // --- Normal mode ---
                 match key.code {
+                    KeyCode::Esc => {
+                        app.help_visible = false;
+                    }
+                    KeyCode::Char('?') => {
+                        app.help_visible = !app.help_visible;
+                    }
                     KeyCode::Char('o') | KeyCode::Char('ㅐ') => {
+                        app.help_visible = false;
                         let sources = match app.view_mode {
                             ViewMode::Interface | ViewMode::Network => vec![CommandSourceId::Ifconfig],
                             ViewMode::Connections => vec![CommandSourceId::NetstatConnections],
@@ -366,6 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     KeyCode::Char('q') | KeyCode::Char('ㅂ') => break,
                     KeyCode::Char('r') | KeyCode::Char('ㄱ') => {
+                        app.help_visible = false;
                         let _ = tick_update(&mut app);
                         last_tick = std::time::Instant::now();
                     }
@@ -376,6 +384,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         app.select_previous();
                     }
                     KeyCode::Char('K') => {
+                        app.help_visible = false;
                         if app.view_mode == ViewMode::Ports {
                             // Kill the selected process
                             if let Some(NavigationItem::ListeningPort { pid, command, port, .. }) =
@@ -410,31 +419,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Char('f') | KeyCode::Char('ㄹ') => {
+                        app.help_visible = false;
                         if app.view_mode == ViewMode::Ports {
                             app.port_filter_active = true;
                         }
                     }
                     KeyCode::Char('a') | KeyCode::Char('ㅁ') => {
+                        app.help_visible = false;
                         app.show_all = !app.show_all;
                         let _ = tick_update(&mut app);
                         last_tick = std::time::Instant::now();
                     }
                     KeyCode::Char('i') | KeyCode::Char('ㅑ') => {
+                        app.help_visible = false;
                         app.set_view_mode(ViewMode::Interface);
                     }
                     KeyCode::Char('n') | KeyCode::Char('ㅜ') => {
+                        app.help_visible = false;
                         app.set_view_mode(ViewMode::Network);
                     }
                     KeyCode::Char('p') | KeyCode::Char('ㅔ') => {
+                        app.help_visible = false;
                         app.set_view_mode(ViewMode::Ports);
                     }
                     KeyCode::Char('e') | KeyCode::Char('ㄷ') => {
+                        app.help_visible = false;
                         app.set_view_mode(ViewMode::Timeline);
                     }
                     KeyCode::Char('g') | KeyCode::Char('ㅎ') => {
+                        app.help_visible = false;
                         app.set_view_mode(ViewMode::Routes);
                     }
                     KeyCode::Char('c') | KeyCode::Char('ㅊ') => {
+                        app.help_visible = false;
                         if app.view_mode == ViewMode::Connections {
                             if let Some(NavigationItem::Connection { foreign, .. }) = app.navigation_items.get(app.selected_index) {
                                 let foreign_ip = if let Some(pos) = foreign.rfind(':') {
@@ -471,6 +488,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Char('w') | KeyCode::Char('ㅈ') => {
+                        app.help_visible = false;
                         if app.view_mode == ViewMode::Connections {
                             if let Some(NavigationItem::Connection { foreign, .. }) = app.navigation_items.get(app.selected_index) {
                                 let foreign_ip = if let Some(pos) = foreign.rfind(':') {
@@ -519,9 +537,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Char('[') => {
+                        app.help_visible = false;
                         app.scroll_details_up();
                     }
                     KeyCode::Char(']') => {
+                        app.help_visible = false;
                         app.scroll_details_down();
                     }
                     _ => {}
