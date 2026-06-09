@@ -30,10 +30,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),
-            Constraint::Length(5),
-            Constraint::Length(filter_bar_height),
-            Constraint::Length(1),
+            Constraint::Min(3),                    // 0: Top pane
+            Constraint::Length(1),                 // 1: Active Command Panel (NEW)
+            Constraint::Length(5),                 // 2: Recent Events Panel
+            Constraint::Length(filter_bar_height), // 3: Filter Bar
+            Constraint::Length(1),                 // 4: Status Bar
         ])
         .split(frame.size());
 
@@ -613,7 +614,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
         frame.render_widget(details_p, details_inner);
     }
 
-    // 3. Event Panel
+    // 3. Active Command Panel
+    let command_str = get_active_command(app.view_mode);
+    let command_line = Line::from(vec![
+        Span::styled("$ ", Style::default().fg(Color::Rgb(0, 255, 102)).add_modifier(Modifier::BOLD)),
+        Span::styled(command_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+    ]);
+    let command_p = Paragraph::new(command_line);
+    frame.render_widget(command_p, chunks[1]);
+
+    // 4. Event Panel
     let event_block = Block::default()
         .borders(Borders::ALL)
         .title(" Recent Events ");
@@ -632,9 +642,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         event_items.push(ListItem::new(format!("[{}] {}", time_str, event.message)).style(item_style));
     }
     let event_list = List::new(event_items).block(event_block);
-    frame.render_widget(event_list, chunks[1]);
+    frame.render_widget(event_list, chunks[2]);
 
-    // 4. Filter Bar (Ports view only)
+    // 5. Filter Bar (Ports view only)
     if filter_bar_height > 0 {
         let filter_text = if app.port_filter_active {
             format!(" 🔍 Filter: {}▌", app.port_filter)
@@ -647,11 +657,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
             Style::default().bg(Color::DarkGray).fg(Color::White)
         };
         let filter_p = Paragraph::new(filter_text).style(filter_style);
-        frame.render_widget(filter_p, chunks[2]);
+        frame.render_widget(filter_p, chunks[3]);
     }
 
-    // 5. Status Bar
-    let status_idx = 3;
+    // 6. Status Bar
+    let status_idx = 4;
     let status_text = match app.view_mode {
         ViewMode::Connections => {
             " q: Quit | c: Copy IP | w: WHOIS | o: Raw Output | [/]: Scroll | i: Interface | n: Network | p: Ports | e: Timeline | g: Routes | j/k: Nav ".to_string()
