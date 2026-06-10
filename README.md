@@ -24,6 +24,20 @@ It combines `ifconfig`, `netstat`, `route`, `lsof`, and a periodic public IP loo
   - `lsof`
   - `curl`
 
+## Install
+
+From GitHub:
+
+```bash
+cargo install --git https://github.com/hunchulchoi/lazyifconfig.git
+```
+
+From a local checkout:
+
+```bash
+cargo install --path .
+```
+
 ## Build
 
 ```bash
