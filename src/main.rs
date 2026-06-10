@@ -9,7 +9,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use lazyifconfig::app::{App, ViewMode, NavigationItem};
 use lazyifconfig::command::{
     default_route_command_spec, interface_command_spec, route_table_command_spec,
-    run_command_capture, run_kill, run_netstat_ib,
+    listening_ports_command_spec, run_command_capture, run_kill, run_netstat_ib,
 };
 use lazyifconfig::collector::interface::{parse_interfaces, merge_gateways};
 use lazyifconfig::collector::stats::merge_stats;
@@ -82,9 +82,16 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
         Vec::new()
     };
 
-    let ports_res = capture_command_output(app, CommandSourceId::LsofPorts, "lsof -iTCP -sTCP:LISTEN -P -n", "lsof", &["-iTCP", "-sTCP:LISTEN", "-P", "-n"]);
-    let listening_ports = if let Ok(lsof_out) = &ports_res {
-        parse_listening_ports(lsof_out)
+    let listening_ports_command = listening_ports_command_spec();
+    let ports_res = capture_command_output(
+        app,
+        CommandSourceId::LsofPorts,
+        listening_ports_command.display,
+        listening_ports_command.program,
+        listening_ports_command.args,
+    );
+    let listening_ports = if let Ok(ports_out) = &ports_res {
+        parse_listening_ports(ports_out)
     } else {
         Vec::new()
     };

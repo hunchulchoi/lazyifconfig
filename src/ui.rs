@@ -23,7 +23,13 @@ fn get_active_command(view_mode: ViewMode) -> &'static str {
             }
         }
         ViewMode::Connections => "netstat -an",
-        ViewMode::Ports => "lsof -iTCP -sTCP:LISTEN -P -n",
+        ViewMode::Ports => {
+            if cfg!(target_os = "linux") {
+                "ss -H -ltnp"
+            } else {
+                "lsof -iTCP -sTCP:LISTEN -P -n"
+            }
+        }
         ViewMode::Routes => {
             if cfg!(target_os = "linux") {
                 "ip route show"
@@ -1263,7 +1269,12 @@ mod tests {
         assert_eq!(get_active_command(ViewMode::Interface), interface_command);
         assert_eq!(get_active_command(ViewMode::Network), interface_command);
         assert_eq!(get_active_command(ViewMode::Connections), "netstat -an");
-        assert_eq!(get_active_command(ViewMode::Ports), "lsof -iTCP -sTCP:LISTEN -P -n");
+        let ports_command = if cfg!(target_os = "linux") {
+            "ss -H -ltnp"
+        } else {
+            "lsof -iTCP -sTCP:LISTEN -P -n"
+        };
+        assert_eq!(get_active_command(ViewMode::Ports), ports_command);
         let route_command = if cfg!(target_os = "linux") {
             "ip route show"
         } else {

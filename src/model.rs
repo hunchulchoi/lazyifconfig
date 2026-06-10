@@ -288,7 +288,13 @@ impl CommandSourceId {
                 }
             }
             CommandSourceId::NetstatConnections => "netstat -an",
-            CommandSourceId::LsofPorts => "lsof -iTCP -sTCP:LISTEN -P -n",
+            CommandSourceId::LsofPorts => {
+                if cfg!(target_os = "linux") {
+                    "ss -H -ltnp"
+                } else {
+                    "lsof -iTCP -sTCP:LISTEN -P -n"
+                }
+            }
             CommandSourceId::PublicIp => "curl -s -m 5 https://ipinfo.io/json",
             CommandSourceId::GitHubRelease => "curl -s -L https://api.github.com/repos/<owner>/<repo>/releases/latest",
             CommandSourceId::Arp => "arp -a",

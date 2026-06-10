@@ -24,6 +24,10 @@ pub fn default_route_command_spec() -> CommandSpec {
     default_route_command_spec_for_os(std::env::consts::OS)
 }
 
+pub fn listening_ports_command_spec() -> CommandSpec {
+    listening_ports_command_spec_for_os(std::env::consts::OS)
+}
+
 pub fn interface_command_spec_for_os(os: &str) -> CommandSpec {
     if os == "linux" {
         CommandSpec {
@@ -68,6 +72,22 @@ pub fn default_route_command_spec_for_os(os: &str) -> CommandSpec {
             display: "route -n get default",
             program: "route",
             args: &["-n", "get", "default"],
+        }
+    }
+}
+
+pub fn listening_ports_command_spec_for_os(os: &str) -> CommandSpec {
+    if os == "linux" {
+        CommandSpec {
+            display: "ss -H -ltnp",
+            program: "ss",
+            args: &["-H", "-ltnp"],
+        }
+    } else {
+        CommandSpec {
+            display: "lsof -iTCP -sTCP:LISTEN -P -n",
+            program: "lsof",
+            args: &["-iTCP", "-sTCP:LISTEN", "-P", "-n"],
         }
     }
 }
@@ -130,7 +150,8 @@ pub fn run_netstat_ib() -> Result<String, String> {
 }
 
 pub fn run_lsof_listening() -> Result<String, String> {
-    let output = run_command_capture("lsof", &["-iTCP", "-sTCP:LISTEN", "-P", "-n"])?;
+    let command = listening_ports_command_spec();
+    let output = run_command_capture(command.program, command.args)?;
 
     if output.exit_code == Some(0) {
         Ok(output.stdout)
@@ -261,6 +282,24 @@ mod tests {
         assert_eq!(default_route.display, "route -n get default");
         assert_eq!(default_route.program, "route");
         assert_eq!(default_route.args, &["-n", "get", "default"]);
+    }
+
+    #[test]
+    fn ports_command_uses_ss_on_linux() {
+        let command = listening_ports_command_spec_for_os("linux");
+
+        assert_eq!(command.display, "ss -H -ltnp");
+        assert_eq!(command.program, "ss");
+        assert_eq!(command.args, &["-H", "-ltnp"]);
+    }
+
+    #[test]
+    fn ports_command_uses_lsof_on_non_linux() {
+        let command = listening_ports_command_spec_for_os("macos");
+
+        assert_eq!(command.display, "lsof -iTCP -sTCP:LISTEN -P -n");
+        assert_eq!(command.program, "lsof");
+        assert_eq!(command.args, &["-iTCP", "-sTCP:LISTEN", "-P", "-n"]);
     }
 
     #[test]

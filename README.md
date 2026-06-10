@@ -20,7 +20,7 @@ It combines local interface, route, connection, port, and public IP data into a 
 - Interface view with IPv4 and IPv6 details
 - Network grouping by subnet
 - Active connection list from `netstat -an`
-- Listening port list from `lsof`
+- Listening port list from `lsof` on macOS and `ss` on Linux
 - Route view from `netstat -rn` on macOS and `ip route show` on Linux
 - Event timeline for interface and public IP changes
 - Raw command output capture inside the app
@@ -32,8 +32,8 @@ It combines local interface, route, connection, port, and public IP data into a 
 - Rust toolchain
 - System commands available in `PATH`:
   - macOS: `ifconfig`, `netstat`, `route`
-  - Linux: `ip`, `netstat`
-  - `lsof`
+  - Linux: `ip`, `netstat`, `ss`
+  - macOS: `lsof`
   - `curl`
 
 ## Install
@@ -105,19 +105,19 @@ cargo test
 GitHub Actions creates a release when a tag matching `v*` is pushed.
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
 You can also trigger the `Create Release Tag` workflow from GitHub Actions.
-Enter `0.2.1` or `v0.2.1` as the input, and it will:
+Enter `0.2.2` or `v0.2.2` as the input, and it will:
 
 - verify the version matches `Cargo.toml`
 - create an annotated `v*` tag
 - push the tag so the `Release` workflow builds artifacts and publishes the GitHub Release
 
 For crates.io publishing, trigger the `Publish Crate` workflow from GitHub Actions.
-Enter `0.2.1` or `v0.2.1`, and it will:
+Enter `0.2.2` or `v0.2.2`, and it will:
 
 - verify the version matches `Cargo.toml`
 - run `cargo publish --dry-run --locked`
@@ -141,5 +141,5 @@ The release workflow builds and uploads artifacts for:
 
 ## Notes
 
-- Linux interface and route views use `ip`; connection and port views still rely on `netstat` and `lsof`.
+- Linux interface and route views use `ip`, and the port view uses `ss`; the connection view still relies on `netstat`.
 - Public IP information is fetched from `https://ipinfo.io/json`.

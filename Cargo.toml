@@ -1,6 +1,6 @@
 [package]
 name = "lazyifconfig"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "Terminal UI for inspecting local network state"
 readme = "README.md"

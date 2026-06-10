@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Crate version to publish, for example 0.2.1 or v0.2.1"
+        description: "Crate version to publish, for example 0.2.2 or v0.2.2"
         required: true
         type: string
       dry_run_only:
