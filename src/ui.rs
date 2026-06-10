@@ -15,10 +15,22 @@ pub fn render_title() -> &'static str {
 
 fn get_active_command(view_mode: ViewMode) -> &'static str {
     match view_mode {
-        ViewMode::Interface | ViewMode::Network => "ifconfig",
+        ViewMode::Interface | ViewMode::Network => {
+            if cfg!(target_os = "linux") {
+                "ip -details -statistics address show"
+            } else {
+                "ifconfig"
+            }
+        }
         ViewMode::Connections => "netstat -an",
         ViewMode::Ports => "lsof -iTCP -sTCP:LISTEN -P -n",
-        ViewMode::Routes => "netstat -rn",
+        ViewMode::Routes => {
+            if cfg!(target_os = "linux") {
+                "ip route show"
+            } else {
+                "netstat -rn"
+            }
+        }
         ViewMode::Timeline => "event-logger",
     }
 }
@@ -1243,11 +1255,21 @@ mod tests {
 
     #[test]
     fn test_get_active_command() {
-        assert_eq!(get_active_command(ViewMode::Interface), "ifconfig");
-        assert_eq!(get_active_command(ViewMode::Network), "ifconfig");
+        let interface_command = if cfg!(target_os = "linux") {
+            "ip -details -statistics address show"
+        } else {
+            "ifconfig"
+        };
+        assert_eq!(get_active_command(ViewMode::Interface), interface_command);
+        assert_eq!(get_active_command(ViewMode::Network), interface_command);
         assert_eq!(get_active_command(ViewMode::Connections), "netstat -an");
         assert_eq!(get_active_command(ViewMode::Ports), "lsof -iTCP -sTCP:LISTEN -P -n");
-        assert_eq!(get_active_command(ViewMode::Routes), "netstat -rn");
+        let route_command = if cfg!(target_os = "linux") {
+            "ip route show"
+        } else {
+            "netstat -rn"
+        };
+        assert_eq!(get_active_command(ViewMode::Routes), route_command);
         assert_eq!(get_active_command(ViewMode::Timeline), "event-logger");
     }
 

@@ -266,9 +266,27 @@ pub enum CommandSourceId {
 impl CommandSourceId {
     pub fn as_str(&self) -> &'static str {
         match self {
-            CommandSourceId::Ifconfig => "ifconfig",
-            CommandSourceId::NetstatRoutes => "netstat -rn",
-            CommandSourceId::DefaultRoute => "route -n get default",
+            CommandSourceId::Ifconfig => {
+                if cfg!(target_os = "linux") {
+                    "ip -details -statistics address show"
+                } else {
+                    "ifconfig"
+                }
+            }
+            CommandSourceId::NetstatRoutes => {
+                if cfg!(target_os = "linux") {
+                    "ip route show"
+                } else {
+                    "netstat -rn"
+                }
+            }
+            CommandSourceId::DefaultRoute => {
+                if cfg!(target_os = "linux") {
+                    "ip route show default"
+                } else {
+                    "route -n get default"
+                }
+            }
             CommandSourceId::NetstatConnections => "netstat -an",
             CommandSourceId::LsofPorts => "lsof -iTCP -sTCP:LISTEN -P -n",
             CommandSourceId::PublicIp => "curl -s -m 5 https://ipinfo.io/json",

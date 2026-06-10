@@ -9,13 +9,12 @@ pub fn parse_interfaces(input: &str) -> Vec<NetworkInterface> {
     let mut current: Option<NetworkInterface> = None;
 
     for line in input.lines() {
-        if is_interface_header(line) {
+        if let Some(name) = parse_interface_header_name(line) {
             if let Some(mut interface) = current.take() {
                 interface.network_kind = classify_interface(&interface.name, &interface.ipv4, &interface.ipv6);
                 interfaces.push(interface);
             }
 
-            let name = line.split(':').next().unwrap_or_default().to_string();
             current = Some(NetworkInterface {
                 interface_type: infer_interface_type(&name),
                 network_kind: NetworkKind::Unknown,
@@ -38,11 +37,14 @@ pub fn parse_interfaces(input: &str) -> Vec<NetworkInterface> {
 
         if let Some(value) = trimmed.strip_prefix("ether ") {
             interface.mac_address = Some(value.to_string());
+        } else if let Some(value) = trimmed.strip_prefix("link/ether ") {
+            if let Some(mac) = value.split_whitespace().next() {
+                interface.mac_address = Some(mac.to_string());
+            }
         } else if let Some(value) = trimmed.strip_prefix("inet6 ") {
             let parts: Vec<&str> = value.split_whitespace().collect();
             if !parts.is_empty() {
-                let address = parts[0].to_string();
-                let mut prefix_len = None;
+                let (address, mut prefix_len) = split_cidr_address(parts[0]);
                 let mut gateway = None;
 
                 if let Some(pos) = parts.iter().position(|&p| p == "-->") {
@@ -66,8 +68,7 @@ pub fn parse_interfaces(input: &str) -> Vec<NetworkInterface> {
         } else if let Some(value) = trimmed.strip_prefix("inet ") {
             let parts: Vec<&str> = value.split_whitespace().collect();
             if !parts.is_empty() {
-                let address = parts[0].to_string();
-                let mut prefix_len = None;
+                let (address, mut prefix_len) = split_cidr_address(parts[0]);
                 let mut gateway = None;
 
                 if let Some(pos) = parts.iter().position(|&p| p == "-->") {
@@ -108,6 +109,14 @@ fn parse_hex_netmask(hex_str: &str) -> Option<u8> {
     let hex_val = hex_str.strip_prefix("0x")?;
     let val = u32::from_str_radix(hex_val, 16).ok()?;
     Some(val.count_ones() as u8)
+}
+
+fn split_cidr_address(value: &str) -> (String, Option<u8>) {
+    if let Some((address, prefix)) = value.split_once('/') {
+        (address.to_string(), prefix.parse::<u8>().ok())
+    } else {
+        (value.to_string(), None)
+    }
 }
 
 fn classify_interface(name: &str, ipv4: &[InterfaceAddress], ipv6: &[InterfaceAddress]) -> NetworkKind {
@@ -198,8 +207,26 @@ fn classify_interface(name: &str, ipv4: &[InterfaceAddress], ipv6: &[InterfaceAd
     NetworkKind::Unknown
 }
 
-fn is_interface_header(line: &str) -> bool {
-    !line.starts_with(' ') && !line.starts_with('\t') && line.contains(':')
+fn parse_interface_header_name(line: &str) -> Option<String> {
+    if line.starts_with(' ') || line.starts_with('\t') {
+        return None;
+    }
+
+    let (first, rest) = line.split_once(':')?;
+    if first.chars().all(|c| c.is_ascii_digit()) {
+        let (name, _) = rest.trim_start().split_once(':')?;
+        return Some(clean_interface_name(name));
+    }
+
+    Some(clean_interface_name(first))
+}
+
+fn clean_interface_name(name: &str) -> String {
+    name.trim()
+        .split('@')
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn parse_header_status(line: &str) -> InterfaceStatus {
@@ -213,13 +240,13 @@ fn parse_header_status(line: &str) -> InterfaceStatus {
 fn infer_interface_type(name: &str) -> InterfaceType {
     if name.starts_with("utun") {
         InterfaceType::Vpn
-    } else if name == "lo0" {
+    } else if name == "lo0" || name == "lo" {
         InterfaceType::Loopback
     } else if name.starts_with("bridge") {
         InterfaceType::Bridge
     } else if name.starts_with("awdl") {
         InterfaceType::AirDrop
-    } else if name.starts_with("en") {
+    } else if name.starts_with("en") || name.starts_with("eth") || name.starts_with("wlan") {
         InterfaceType::WifiOrEthernet
     } else {
         InterfaceType::Unknown
@@ -242,6 +269,12 @@ pub fn parse_default_gateways(netstat_output: &str) -> HashMap<String, String> {
 
     for line in netstat_output.lines() {
         let trimmed = line.trim();
+        if let Some((netif, gateway, is_ipv6)) = parse_linux_default_route(trimmed) {
+            let family = if is_ipv6 { "v6" } else { "v4" };
+            gateways.insert(format!("{}_{}", netif, family), gateway);
+            continue;
+        }
+
         if trimmed.starts_with("Internet:") {
             parsing_ipv4 = true;
             parsing_ipv6 = false;
@@ -274,6 +307,27 @@ pub fn parse_default_gateways(netstat_output: &str) -> HashMap<String, String> {
         }
     }
     gateways
+}
+
+fn parse_linux_default_route(line: &str) -> Option<(String, String, bool)> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.first().copied() != Some("default") {
+        return None;
+    }
+
+    let gateway = value_after(&parts, "via")?;
+    let interface = value_after(&parts, "dev")?;
+    let clean_gateway = gateway.split('%').next().unwrap_or(gateway).to_string();
+    let is_ipv6 = clean_gateway.contains(':');
+
+    Some((interface.to_string(), clean_gateway, is_ipv6))
+}
+
+fn value_after<'a>(parts: &'a [&str], key: &str) -> Option<&'a str> {
+    parts
+        .iter()
+        .position(|part| *part == key)
+        .and_then(|index| parts.get(index + 1).copied())
 }
 
 pub fn merge_gateways(interfaces: &mut [NetworkInterface], netstat_output: &str) {

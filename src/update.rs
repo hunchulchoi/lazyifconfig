@@ -420,7 +420,7 @@ mod tests {
         let url = release_api_url().unwrap();
         assert_eq!(
             url,
-            "https://api.github.com/repos/hunchulchoi/lazyifconfig/releases/latest"
+            "https://api.github.com/repos/choihunchul/lazyifconfig/releases/latest"
         );
     }
 }

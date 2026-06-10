@@ -5,6 +5,73 @@ pub struct CommandResult {
     pub exit_code: Option<i32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommandSpec {
+    pub display: &'static str,
+    pub program: &'static str,
+    pub args: &'static [&'static str],
+}
+
+pub fn interface_command_spec() -> CommandSpec {
+    interface_command_spec_for_os(std::env::consts::OS)
+}
+
+pub fn route_table_command_spec() -> CommandSpec {
+    route_table_command_spec_for_os(std::env::consts::OS)
+}
+
+pub fn default_route_command_spec() -> CommandSpec {
+    default_route_command_spec_for_os(std::env::consts::OS)
+}
+
+pub fn interface_command_spec_for_os(os: &str) -> CommandSpec {
+    if os == "linux" {
+        CommandSpec {
+            display: "ip -details -statistics address show",
+            program: "ip",
+            args: &["-details", "-statistics", "address", "show"],
+        }
+    } else {
+        CommandSpec {
+            display: "ifconfig",
+            program: "ifconfig",
+            args: &[],
+        }
+    }
+}
+
+pub fn route_table_command_spec_for_os(os: &str) -> CommandSpec {
+    if os == "linux" {
+        CommandSpec {
+            display: "ip route show",
+            program: "ip",
+            args: &["route", "show"],
+        }
+    } else {
+        CommandSpec {
+            display: "netstat -rn",
+            program: "netstat",
+            args: &["-rn"],
+        }
+    }
+}
+
+pub fn default_route_command_spec_for_os(os: &str) -> CommandSpec {
+    if os == "linux" {
+        CommandSpec {
+            display: "ip route show default",
+            program: "ip",
+            args: &["route", "show", "default"],
+        }
+    } else {
+        CommandSpec {
+            display: "route -n get default",
+            program: "route",
+            args: &["-n", "get", "default"],
+        }
+    }
+}
+
 pub fn run_command_capture(program: &str, args: &[&str]) -> Result<CommandResult, String> {
     use std::process::Command;
 
@@ -21,7 +88,8 @@ pub fn run_command_capture(program: &str, args: &[&str]) -> Result<CommandResult
 }
 
 pub fn run_ifconfig(_show_all: bool) -> Result<String, String> {
-    let output = run_command_capture("ifconfig", &[])?;
+    let command = interface_command_spec();
+    let output = run_command_capture(command.program, command.args)?;
 
     if output.exit_code == Some(0) {
         Ok(output.stdout)
@@ -31,7 +99,8 @@ pub fn run_ifconfig(_show_all: bool) -> Result<String, String> {
 }
 
 pub fn run_netstat() -> Result<String, String> {
-    let output = run_command_capture("netstat", &["-rn"])?;
+    let command = route_table_command_spec();
+    let output = run_command_capture(command.program, command.args)?;
 
     if output.exit_code == Some(0) {
         Ok(output.stdout)
@@ -136,7 +205,8 @@ pub fn run_curl(url: &str) -> Result<String, String> {
 }
 
 pub fn run_route_default() -> Result<String, String> {
-    let output = run_command_capture("route", &["-n", "get", "default"])?;
+    let command = default_route_command_spec();
+    let output = run_command_capture(command.program, command.args)?;
 
     if output.exit_code == Some(0) {
         Ok(output.stdout)
@@ -150,16 +220,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn interface_command_uses_ip_on_linux() {
+        let command = interface_command_spec_for_os("linux");
+
+        assert_eq!(command.display, "ip -details -statistics address show");
+        assert_eq!(command.program, "ip");
+        assert_eq!(command.args, &["-details", "-statistics", "address", "show"]);
+    }
+
+    #[test]
+    fn interface_command_uses_ifconfig_on_non_linux() {
+        let command = interface_command_spec_for_os("macos");
+
+        assert_eq!(command.display, "ifconfig");
+        assert_eq!(command.program, "ifconfig");
+        assert!(command.args.is_empty());
+    }
+
+    #[test]
+    fn route_commands_use_ip_on_linux() {
+        let routes = route_table_command_spec_for_os("linux");
+        let default_route = default_route_command_spec_for_os("linux");
+
+        assert_eq!(routes.display, "ip route show");
+        assert_eq!(routes.program, "ip");
+        assert_eq!(routes.args, &["route", "show"]);
+        assert_eq!(default_route.display, "ip route show default");
+        assert_eq!(default_route.program, "ip");
+        assert_eq!(default_route.args, &["route", "show", "default"]);
+    }
+
+    #[test]
+    fn route_commands_use_legacy_tools_on_non_linux() {
+        let routes = route_table_command_spec_for_os("macos");
+        let default_route = default_route_command_spec_for_os("macos");
+
+        assert_eq!(routes.display, "netstat -rn");
+        assert_eq!(routes.program, "netstat");
+        assert_eq!(routes.args, &["-rn"]);
+        assert_eq!(default_route.display, "route -n get default");
+        assert_eq!(default_route.program, "route");
+        assert_eq!(default_route.args, &["-n", "get", "default"]);
+    }
+
+    #[test]
     fn test_run_ifconfig_success() {
         let result = run_ifconfig(false);
         assert!(result.is_ok());
         let output = result.unwrap();
-        assert!(output.contains("lo0") || output.contains("en0"));
+        if cfg!(target_os = "linux") {
+            assert!(output.contains(" lo:") || output.contains(" lo "));
+        } else {
+            assert!(output.contains("lo0") || output.contains("en0"));
+        }
 
         let result_all = run_ifconfig(true);
         assert!(result_all.is_ok());
         let output_all = result_all.unwrap();
-        assert!(output_all.contains("lo0") || output_all.contains("en0"));
+        if cfg!(target_os = "linux") {
+            assert!(output_all.contains(" lo:") || output_all.contains(" lo "));
+        } else {
+            assert!(output_all.contains("lo0") || output_all.contains("en0"));
+        }
     }
 
     #[test]

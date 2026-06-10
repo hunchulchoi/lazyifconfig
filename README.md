@@ -1,7 +1,7 @@
 # lazyifconfig
 
-`lazyifconfig` is a terminal UI for inspecting local network state on macOS.
-It combines `ifconfig`, `netstat`, `route`, `lsof`, and a periodic public IP lookup into a single view for interfaces, subnets, routes, connections, ports, and recent network events.
+`lazyifconfig` is a terminal UI for inspecting local network state.
+It combines local interface, route, connection, port, and public IP data into a single view for interfaces, subnets, routes, connections, ports, and recent network events.
 
 ## Screenshots
 
@@ -21,23 +21,29 @@ It combines `ifconfig`, `netstat`, `route`, `lsof`, and a periodic public IP loo
 - Network grouping by subnet
 - Active connection list from `netstat -an`
 - Listening port list from `lsof`
-- Route view from `netstat -rn`
+- Route view from `netstat -rn` on macOS and `ip route show` on Linux
 - Event timeline for interface and public IP changes
 - Raw command output capture inside the app
 - Background GitHub Release check with self-update support
 
 ## Requirements
 
-- macOS
+- macOS or Linux
 - Rust toolchain
 - System commands available in `PATH`:
-  - `ifconfig`
-  - `netstat`
-  - `route`
+  - macOS: `ifconfig`, `netstat`, `route`
+  - Linux: `ip`, `netstat`
   - `lsof`
   - `curl`
 
 ## Install
+
+From Homebrew tap:
+
+```bash
+brew tap choihunchul/homebrew-tap
+brew install lazyifconfig
+```
 
 From crates.io:
 
@@ -48,7 +54,7 @@ cargo install lazyifconfig
 From GitHub:
 
 ```bash
-cargo install --git https://github.com/hunchulchoi/lazyifconfig.git
+cargo install --git https://github.com/choihunchul/lazyifconfig.git
 ```
 
 From a local checkout:
@@ -86,7 +92,7 @@ cargo run --release
 
 Some views expose additional actions in the footer, including filtering ports, copying values, WHOIS lookup, and raw output inspection.
 
-When a newer GitHub Release is found, `lazyifconfig` will attempt to install the matching macOS release artifact automatically. After the binary is replaced, restart the app to run the new version.
+When a newer GitHub Release is found, `lazyifconfig` will attempt to install the matching release artifact automatically. After the binary is replaced, restart the app to run the new version.
 
 ## Testing
 
@@ -99,23 +105,32 @@ cargo test
 GitHub Actions creates a release when a tag matching `v*` is pushed.
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 You can also trigger the `Create Release Tag` workflow from GitHub Actions.
-Enter `0.2.0` or `v0.2.0` as the input, and it will:
+Enter `0.2.1` or `v0.2.1` as the input, and it will:
 
 - verify the version matches `Cargo.toml`
 - create an annotated `v*` tag
 - push the tag so the `Release` workflow builds artifacts and publishes the GitHub Release
 
 For crates.io publishing, trigger the `Publish Crate` workflow from GitHub Actions.
-Enter `0.2.0` or `v0.2.0`, and it will:
+Enter `0.2.1` or `v0.2.1`, and it will:
 
 - verify the version matches `Cargo.toml`
 - run `cargo publish --dry-run --locked`
 - optionally publish to crates.io with the `CARGO_REGISTRY_TOKEN` secret
+
+For Homebrew publishing, create a tap repository such as `choihunchul/homebrew-tap`,
+add a `HOMEBREW_TAP_TOKEN` secret with push access to that repo, then trigger
+the `Publish Homebrew Tap` workflow. It will:
+
+- download the macOS release tarballs for the selected tag
+- compute SHA-256 checksums
+- write `Formula/lazyifconfig.rb` into the tap repository
+- push the formula update so `brew tap ... && brew install lazyifconfig` works
 
 The release workflow builds and uploads artifacts for:
 
@@ -126,5 +141,5 @@ The release workflow builds and uploads artifacts for:
 
 ## Notes
 
-- The app is built around macOS networking command output, so behavior on other platforms is not expected to be reliable.
+- Linux interface and route views use `ip`; connection and port views still rely on `netstat` and `lsof`.
 - Public IP information is fetched from `https://ipinfo.io/json`.

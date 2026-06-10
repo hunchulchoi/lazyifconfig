@@ -1,0 +1,139 @@
+name: Publish Homebrew Tap
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 0.2.1 or v0.2.1"
+        required: true
+        type: string
+      tap_repository:
+        description: "Homebrew tap repository, for example choihunchul/homebrew-tap"
+        required: true
+        default: "choihunchul/homebrew-tap"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-tap:
+    name: Generate and publish Homebrew formula
+    runs-on: ubuntu-latest
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+    steps:
+      - name: Verify tap token exists
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN secret is not configured" >&2
+            exit 1
+          fi
+
+      - name: Normalize release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          raw_version="${{ inputs.version }}"
+          version="${raw_version#v}"
+          tag="v${version}"
+          base_url="https://github.com/choihunchul/lazyifconfig/releases/download/${tag}"
+          intel_file="lazyifconfig-${tag}-x86_64-apple-darwin.tar.gz"
+          arm_file="lazyifconfig-${tag}-aarch64-apple-darwin.tar.gz"
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "intel_url=${base_url}/${intel_file}" >> "${GITHUB_OUTPUT}"
+          echo "arm_url=${base_url}/${arm_file}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download release artifacts and compute checksums
+        id: shas
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl -fsSL -o lazyifconfig-intel.tar.gz "${{ steps.meta.outputs.intel_url }}"
+          curl -fsSL -o lazyifconfig-arm.tar.gz "${{ steps.meta.outputs.arm_url }}"
+
+          intel_sha="$(sha256sum lazyifconfig-intel.tar.gz | awk '{print $1}')"
+          arm_sha="$(sha256sum lazyifconfig-arm.tar.gz | awk '{print $1}')"
+
+          echo "intel_sha=${intel_sha}" >> "${GITHUB_OUTPUT}"
+          echo "arm_sha=${arm_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.tap_repository }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Write formula
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p tap/Formula
+          cat > tap/Formula/lazyifconfig.rb <<EOF
+          class Lazyifconfig < Formula
+            desc "Terminal UI for inspecting local network state"
+            homepage "https://github.com/choihunchul/lazyifconfig"
+            license "MIT"
+            version "${{ steps.meta.outputs.version }}"
+
+            on_macos do
+              on_intel do
+                url "${{ steps.meta.outputs.intel_url }}"
+                sha256 "${{ steps.shas.outputs.intel_sha }}"
+              end
+
+              on_arm do
+                url "${{ steps.meta.outputs.arm_url }}"
+                sha256 "${{ steps.shas.outputs.arm_sha }}"
+              end
+            end
+
+            def install
+              bin.install "lazyifconfig"
+            end
+
+            test do
+              assert_predicate bin/"lazyifconfig", :exist?
+            end
+          end
+          EOF
+
+      - name: Commit and push formula
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "No formula changes detected"
+            exit 0
+          fi
+
+          git add Formula/lazyifconfig.rb
+          git commit -m "lazyifconfig ${{ steps.meta.outputs.tag }}"
+          git push origin HEAD
+
+      - name: Write summary
+        shell: bash
+        run: |
+          {
+            echo "## Homebrew tap publish"
+            echo
+            echo "- Version: \`${{ steps.meta.outputs.version }}\`"
+            echo "- Tap repository: \`${{ inputs.tap_repository }}\`"
+            echo "- Install command: \`brew tap ${{ inputs.tap_repository }} && brew install lazyifconfig\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

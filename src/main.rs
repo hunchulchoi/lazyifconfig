@@ -7,7 +7,10 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use lazyifconfig::app::{App, ViewMode, NavigationItem};
-use lazyifconfig::command::{run_command_capture, run_kill, run_netstat_ib};
+use lazyifconfig::command::{
+    default_route_command_spec, interface_command_spec, route_table_command_spec,
+    run_command_capture, run_kill, run_netstat_ib,
+};
 use lazyifconfig::collector::interface::{parse_interfaces, merge_gateways};
 use lazyifconfig::collector::stats::merge_stats;
 use lazyifconfig::collector::connections::parse_connections;
@@ -30,11 +33,25 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
     maybe_start_auto_update_check(app);
     maybe_start_auto_update_install(app);
 
-    let raw_out_res = capture_command_output(app, CommandSourceId::Ifconfig, "ifconfig", "ifconfig", &[]);
+    let interface_command = interface_command_spec();
+    let raw_out_res = capture_command_output(
+        app,
+        CommandSourceId::Ifconfig,
+        interface_command.display,
+        interface_command.program,
+        interface_command.args,
+    );
     let raw_out = raw_out_res?;
     let mut parsed = parse_interfaces(&raw_out);
     
-    let netstat_out_res = capture_command_output(app, CommandSourceId::NetstatRoutes, "netstat -rn", "netstat", &["-rn"]);
+    let route_table_command = route_table_command_spec();
+    let netstat_out_res = capture_command_output(
+        app,
+        CommandSourceId::NetstatRoutes,
+        route_table_command.display,
+        route_table_command.program,
+        route_table_command.args,
+    );
     let netstat_out = netstat_out_res.ok();
     if let Some(out) = &netstat_out {
         merge_gateways(&mut parsed, out);
@@ -46,7 +63,14 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
         Vec::new()
     };
     
-    let _ = capture_command_output(app, CommandSourceId::DefaultRoute, "route -n get default", "route", &["-n", "get", "default"]);
+    let default_route_command = default_route_command_spec();
+    let _ = capture_command_output(
+        app,
+        CommandSourceId::DefaultRoute,
+        default_route_command.display,
+        default_route_command.program,
+        default_route_command.args,
+    );
 
     let stats_out = run_netstat_ib().unwrap_or_else(|_| raw_out.clone());
     let merged = merge_stats(&stats_out, parsed);
