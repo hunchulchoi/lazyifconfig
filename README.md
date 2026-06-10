@@ -3,6 +3,8 @@
 `lazyifconfig` is a terminal UI for inspecting local network state on macOS.
 It combines `ifconfig`, `netstat`, `route`, `lsof`, and a periodic public IP lookup into a single view for interfaces, subnets, routes, connections, ports, and recent network events.
 
+![lazyifconfig screenshot](screenshot.png)
+
 ## Features
 
 - Interface view with IPv4 and IPv6 details
