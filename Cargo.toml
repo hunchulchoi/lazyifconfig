@@ -6,6 +6,7 @@ description = "Terminal UI for inspecting local network state on macOS"
 readme = "README.md"
 repository = "https://github.com/hunchulchoi/lazyifconfig"
 homepage = "https://github.com/hunchulchoi/lazyifconfig"
+license = "MIT"
 keywords = ["network", "tui", "macos", "ifconfig", "netstat"]
 categories = ["command-line-utilities"]
 
