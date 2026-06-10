@@ -39,6 +39,12 @@ It combines `ifconfig`, `netstat`, `route`, `lsof`, and a periodic public IP loo
 
 ## Install
 
+From crates.io:
+
+```bash
+cargo install lazyifconfig
+```
+
 From GitHub:
 
 ```bash
@@ -103,6 +109,13 @@ Enter `0.2.0` or `v0.2.0` as the input, and it will:
 - verify the version matches `Cargo.toml`
 - create an annotated `v*` tag
 - push the tag so the `Release` workflow builds artifacts and publishes the GitHub Release
+
+For crates.io publishing, trigger the `Publish Crate` workflow from GitHub Actions.
+Enter `0.2.0` or `v0.2.0`, and it will:
+
+- verify the version matches `Cargo.toml`
+- run `cargo publish --dry-run --locked`
+- optionally publish to crates.io with the `CARGO_REGISTRY_TOKEN` secret
 
 The release workflow builds and uploads artifacts for:
 

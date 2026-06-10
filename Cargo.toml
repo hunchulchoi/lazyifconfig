@@ -9,6 +9,15 @@ homepage = "https://github.com/hunchulchoi/lazyifconfig"
 license = "MIT"
 keywords = ["network", "tui", "macos", "ifconfig", "netstat"]
 categories = ["command-line-utilities"]
+include = [
+  "src/**",
+  "Cargo.toml",
+  "Cargo.lock",
+  "README.md",
+  "LICENSE",
+  "SECURITY.md",
+  "docs/screenshots/raw/*.png",
+]
 
 [dependencies]
 ratatui = "0.26.3"

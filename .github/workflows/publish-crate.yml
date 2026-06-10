@@ -1,0 +1,86 @@
+name: Publish Crate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Crate version to publish, for example 0.2.0 or v0.2.0"
+        required: true
+        type: string
+      dry_run_only:
+        description: "Only validate packaging and publish command without uploading to crates.io"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Validate and publish crate
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate version against Cargo.toml
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          raw_version="${{ inputs.version }}"
+          normalized_version="${raw_version#v}"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+
+          if [[ -z "${cargo_version}" ]]; then
+            echo "Failed to read package version from Cargo.toml" >&2
+            exit 1
+          fi
+
+          if [[ "${cargo_version}" != "${normalized_version}" ]]; then
+            echo "Cargo.toml version (${cargo_version}) does not match requested publish version (${normalized_version})" >&2
+            exit 1
+          fi
+
+          echo "version=${normalized_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify registry token exists
+        if: ${{ !inputs.dry_run_only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+            echo "CARGO_REGISTRY_TOKEN secret is not configured" >&2
+            exit 1
+          fi
+
+      - name: Check publishability
+        run: cargo publish --dry-run --locked
+
+      - name: Publish to crates.io
+        if: ${{ !inputs.dry_run_only }}
+        run: cargo publish --locked
+
+      - name: Write summary
+        shell: bash
+        run: |
+          {
+            echo "## Crate publish"
+            echo
+            echo "- Version: \`${{ steps.version.outputs.version }}\`"
+            echo "- Dry run only: \`${{ inputs.dry_run_only }}\`"
+            if [[ "${{ inputs.dry_run_only }}" == "true" ]]; then
+              echo "- Result: validated with \`cargo publish --dry-run --locked\`"
+            else
+              echo "- Result: published to crates.io"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
