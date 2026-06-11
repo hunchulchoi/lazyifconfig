@@ -559,6 +559,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         render_ports_table(frame, app, list_block, top_chunks[0]);
     } else if app.view_mode == ViewMode::Connections {
         render_connections_table(frame, app, list_block, top_chunks[0]);
+    } else if app.view_mode == ViewMode::Routes {
+        render_routes_table(frame, app, list_block, top_chunks[0]);
     } else {
         let list_widget = List::new(list_items).block(list_block);
         frame.render_widget(list_widget, top_chunks[0]);
@@ -1554,6 +1556,18 @@ fn connection_header_label(app: &App, column: ConnectionSortColumn, label: &str)
     format!("{label} {arrow}")
 }
 
+fn route_header_label(app: &App, column: RouteSortColumn, label: &str) -> String {
+    if app.route_inspector.sort_column != column {
+        return label.to_string();
+    }
+
+    let arrow = match app.route_inspector.route_sort_direction {
+        SortDirection::Ascending => "↑",
+        SortDirection::Descending => "↓",
+    };
+    format!("{label} {arrow}")
+}
+
 fn visible_table_rows(area_height: u16) -> usize {
     area_height
         .saturating_sub(3)
@@ -1578,6 +1592,89 @@ fn visible_rows<T>(mut rows: Vec<T>, selected_index: usize, max_visible: usize) 
     rows.drain(0..start);
     rows.truncate(max_visible);
     rows
+}
+
+fn render_routes_table(frame: &mut Frame, app: &App, block: Block<'_>, area: Rect) {
+    let header = Row::new([
+        Cell::from(route_header_label(
+            app,
+            RouteSortColumn::Destination,
+            "Destination",
+        )),
+        Cell::from(route_header_label(app, RouteSortColumn::Gateway, "Gateway")),
+        Cell::from(route_header_label(
+            app,
+            RouteSortColumn::Interface,
+            "Interface",
+        )),
+        Cell::from(route_header_label(app, RouteSortColumn::Metric, "Metric")),
+        Cell::from("Protocol"),
+        Cell::from("Flags"),
+        Cell::from("Family"),
+    ])
+    .style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let rows: Vec<Row> = app
+        .filtered_sorted_routes()
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (_, route))| {
+            let metric = route
+                .metric
+                .map(|metric| metric.to_string())
+                .unwrap_or_else(|| "-".to_string());
+
+            let style = if idx == app.selected_index {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_default_route(route) {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_vpn_interface_name(&route.interface) {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            };
+
+            Row::new([
+                highlighted_filter_cell(route.destination.clone(), &app.route_inspector.route_filter),
+                highlighted_filter_cell(route.gateway.clone(), &app.route_inspector.route_filter),
+                highlighted_filter_cell(route.interface.clone(), &app.route_inspector.route_filter),
+                Cell::from(metric),
+                Cell::from(route.protocol.as_deref().unwrap_or("-")),
+                Cell::from(route.flags.as_deref().unwrap_or("-")),
+                Cell::from(route_family_label(route.family)),
+            ])
+            .style(style)
+        })
+        .collect();
+
+    let rows = visible_rows(rows, app.selected_index, visible_table_rows(area.height));
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(18),
+            Constraint::Length(16),
+            Constraint::Length(12),
+            Constraint::Length(8),
+            Constraint::Length(8),
+            Constraint::Length(7),
+            Constraint::Length(7),
+        ],
+    )
+    .header(header)
+    .column_spacing(1)
+    .block(block);
+
+    frame.render_widget(table, area);
 }
 
 fn format_endpoint(ip: &str, port: &str) -> String {
@@ -3376,6 +3473,30 @@ mod tests {
         assert!(left_pane.contains("default"));
         assert!(left_pane.contains("192.168.0.1"));
         assert!(left_pane.contains("utun4"));
+    }
+
+    #[test]
+    fn test_routes_view_renders_route_table_headers() {
+        let app = route_test_app(RouteInspectorSection::Summary);
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let mut rendered = String::new();
+        for y in 0..24 {
+            for x in 0..120 {
+                rendered.push_str(buffer.get(x, y).symbol());
+            }
+        }
+
+        assert!(rendered.contains("Destination"));
+        assert!(rendered.contains("Gateway"));
+        assert!(rendered.contains("Interface"));
+        assert!(rendered.contains("Metric"));
+        assert!(rendered.contains("Protocol"));
+        assert!(rendered.contains("Flags"));
+        assert!(rendered.contains("Family"));
     }
 
     #[test]
