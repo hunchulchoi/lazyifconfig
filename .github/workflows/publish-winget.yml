@@ -1,0 +1,79 @@
+# Release workflow 완료 후 WinGet manifest PR을 제출합니다.
+# 최초 1회는 microsoft/winget-pkgs에 수동 PR로 PackageIdentifier를 등록해야 합니다.
+#
+# 필요한 secrets:
+#   WINGET_TOKEN - classic PAT, public_repo scope
+#
+# 사전 준비:
+#   1. https://github.com/microsoft/winget-pkgs fork (보통 choihunchul 계정)
+#   2. PackageIdentifier: Choihunchul.Lazyifconfig
+#   3. winget-pkgs에 최소 1개 버전 머지 완료
+
+name: Publish WinGet Package
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.2.10"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-release:
+    name: Resolve release tag
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve release metadata
+        id: resolve
+        shell: bash
+        env:
+          INPUT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+          HEAD_BRANCH: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${INPUT_TAG}" ]]; then
+            raw_tag="${INPUT_TAG}"
+          elif [[ "${HEAD_BRANCH}" == v* ]]; then
+            raw_tag="${HEAD_BRANCH}"
+          else
+            raw_tag="$(
+              curl -fsSL \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "${GITHUB_API_URL}/repos/${{ github.repository }}/releases/latest" \
+              | jq -r '.tag_name'
+            )"
+          fi
+
+          version="${raw_tag#v}"
+          tag="v${version}"
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  publish-winget:
+    name: Publish to WinGet
+    needs: resolve-release
+    uses: choihunchul/github--actions/.github/workflows/publish-winget.yml@main
+    with:
+      identifier: Choihunchul.Lazyifconfig
+      tag: ${{ needs.resolve-release.outputs.tag }}
+      version: ${{ needs.resolve-release.outputs.version }}
+      verify-tag: false
+      installers-regex: 'lazyifconfig-.*-x86_64-pc-windows-msvc\.zip$'
+      release-notes-url: https://github.com/choihunchul/lazyifconfig/releases/tag/${{ needs.resolve-release.outputs.tag }}
+    secrets:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
