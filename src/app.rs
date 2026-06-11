@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::model::{
     CommandOutput, CommandSourceId, NetworkEvent, NetworkInterface, NetworkSnapshot, PublicIpInfo,
-    Subnet,
+    Subnet, SystemMetrics,
 };
 use crate::update::{AvailableUpdate, UpdateMessage, UpdateStatus};
 
@@ -127,6 +127,8 @@ pub struct App {
     pub update_messages: std::sync::Arc<std::sync::Mutex<Vec<UpdateMessage>>>,
     pub attempted_update_version: Option<String>,
     pub release_notes_viewer: ReleaseNotesViewerState,
+    pub system_metrics: Option<SystemMetrics>,
+    pub previous_cpu_sample: Option<crate::model::CpuSample>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,6 +190,8 @@ impl Default for App {
             update_messages: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             attempted_update_version: None,
             release_notes_viewer: ReleaseNotesViewerState::default(),
+            system_metrics: None,
+            previous_cpu_sample: None,
         }
     }
 }

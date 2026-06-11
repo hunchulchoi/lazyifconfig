@@ -3,7 +3,7 @@ use std::{fs, process::Command, sync::OnceLock};
 use crate::app::{
     App, ConnectionSortColumn, NavigationItem, PortSortColumn, SortDirection, ViewMode,
 };
-use crate::model::{InterfaceStatus, NetworkKind, Subnet};
+use crate::model::{InterfaceStatus, NetworkKind, Subnet, SystemMetrics};
 use chrono::{DateTime, Local};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -19,8 +19,8 @@ pub fn render_title() -> &'static str {
     "lazyifconfig"
 }
 
-fn header_line() -> Line<'static> {
-    Line::from(vec![
+fn header_line(app: &App) -> Line<'static> {
+    let mut spans = vec![
         Span::styled(
             "🦥 Lazyifconfig",
             Style::default()
@@ -29,7 +29,46 @@ fn header_line() -> Line<'static> {
         ),
         Span::styled(" - ", Style::default().fg(Color::DarkGray)),
         Span::styled(os_display_label(), Style::default().fg(Color::White)),
-    ])
+    ];
+
+    if let Some(metrics) = app.system_metrics.as_ref() {
+        if let Some(summary) = format_system_metrics(metrics) {
+            spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(summary, Style::default().fg(Color::LightCyan)));
+        }
+    }
+
+    Line::from(spans)
+}
+
+fn format_system_metrics(metrics: &SystemMetrics) -> Option<String> {
+    let mut parts = Vec::new();
+
+    if let Some(cpu) = metrics.cpu_usage_percent {
+        parts.push(format!("CPU {cpu}%"));
+    }
+
+    if let (Some(used), Some(total)) = (metrics.memory_used_bytes, metrics.memory_total_bytes) {
+        parts.push(format!(
+            "MEM {}/{}",
+            format_gib(used),
+            format_gib_with_unit(total)
+        ));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" | "))
+    }
+}
+
+fn format_gib(bytes: u64) -> String {
+    format!("{:.1}", bytes as f64 / 1024.0 / 1024.0 / 1024.0)
+}
+
+fn format_gib_with_unit(bytes: u64) -> String {
+    format!("{}GB", format_gib(bytes))
 }
 
 fn os_display_label() -> &'static str {
@@ -236,7 +275,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ])
         .split(frame.size());
 
-    let header = Paragraph::new(header_line()).style(Style::default().bg(Color::Rgb(24, 24, 24)));
+    let header =
+        Paragraph::new(header_line(app)).style(Style::default().bg(Color::Rgb(24, 24, 24)));
     frame.render_widget(header, chunks[0]);
 
     let tabs =
@@ -2048,6 +2088,7 @@ fn format_bps(bytes_per_sec: u64) -> String {
 mod tests {
     use super::*;
     use crate::app::App;
+    use crate::model::SystemMetrics;
     use ratatui::{backend::TestBackend, Terminal};
 
     #[test]
@@ -2201,6 +2242,31 @@ mod tests {
         assert!(rendered.contains("Lazyifconfig"));
         assert!(rendered.contains(" - "));
         assert!(rendered.contains(os_display_label()));
+    }
+
+    #[test]
+    fn test_top_header_shows_cpu_and_memory_usage() {
+        let mut app = App::default();
+        app.system_metrics = Some(SystemMetrics {
+            cpu_usage_percent: Some(42),
+            memory_used_bytes: Some(8 * 1024 * 1024 * 1024),
+            memory_total_bytes: Some(16 * 1024 * 1024 * 1024),
+        });
+
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("CPU 42%"));
+        assert!(rendered.contains("MEM 8.0/16.0GB"));
     }
 
     #[test]

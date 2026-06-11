@@ -112,6 +112,19 @@ pub struct PublicIpInfo {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SystemMetrics {
+    pub cpu_usage_percent: Option<u8>,
+    pub memory_used_bytes: Option<u64>,
+    pub memory_total_bytes: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CpuSample {
+    pub idle_ticks: u64,
+    pub total_ticks: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetworkSnapshot {
     pub interfaces: Vec<NetworkInterface>,
     pub connections: Vec<ActiveConnection>,

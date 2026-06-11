@@ -9,6 +9,7 @@ use lazyifconfig::collector::interface::{merge_gateways, parse_interfaces};
 use lazyifconfig::collector::ports::parse_listening_ports;
 use lazyifconfig::collector::routes::parse_routes;
 use lazyifconfig::collector::stats::merge_stats;
+use lazyifconfig::collector::system::collect_system_metrics;
 use lazyifconfig::command::{
     default_route_command_spec, interface_command_spec, listening_ports_command_spec,
     route_table_command_spec, run_command_capture, run_kill, run_netstat_ib,
@@ -35,6 +36,10 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
     drain_update_messages(app);
     maybe_start_auto_update_check(app);
     maybe_start_auto_update_install(app);
+
+    let (system_metrics, cpu_sample) = collect_system_metrics(app.previous_cpu_sample);
+    app.system_metrics = Some(system_metrics);
+    app.previous_cpu_sample = cpu_sample;
 
     let interface_command = interface_command_spec();
     let raw_out_res = capture_command_output(
