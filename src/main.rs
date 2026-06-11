@@ -62,7 +62,7 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
         merge_gateways(&mut parsed, out);
     }
 
-    let routes = if let Some(out) = &netstat_out {
+    let mut routes = if let Some(out) = &netstat_out {
         parse_routes(out)
     } else {
         Vec::new()
@@ -78,7 +78,9 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
     );
 
     if let Some(command) = lazyifconfig::command::ipv6_route_table_command_spec() {
-        let _ = capture_owned_command_output(app, CommandSourceId::Ipv6Routes, &command);
+        let ipv6_route_out =
+            capture_owned_command_output(app, CommandSourceId::Ipv6Routes, &command).ok();
+        routes = merge_additional_route_output(routes, ipv6_route_out.as_deref());
     }
 
     if let Some(command) = lazyifconfig::command::ip_rule_command_spec() {
@@ -291,6 +293,16 @@ fn command_stdout(output: &lazyifconfig::command::CommandResult) -> Result<Strin
     } else {
         Err(output.stderr.clone())
     }
+}
+
+fn merge_additional_route_output(
+    mut routes: Vec<lazyifconfig::model::RouteEntry>,
+    additional_output: Option<&str>,
+) -> Vec<lazyifconfig::model::RouteEntry> {
+    if let Some(output) = additional_output {
+        routes.extend(parse_routes(output));
+    }
+    routes
 }
 
 fn run_route_path_lookup(app: &mut App) {
@@ -1238,6 +1250,21 @@ mod tests {
             raw_viewer_command_to_copy(&app, CommandSourceId::Ifconfig),
             CommandSourceId::Ifconfig.as_str()
         );
+    }
+
+    #[test]
+    fn additional_linux_ipv6_route_output_is_merged_into_snapshot_routes() {
+        let routes = parse_routes("default via 172.17.0.1 dev eth0 proto static metric 100");
+
+        let merged = merge_additional_route_output(
+            routes,
+            Some("default via fe80::1 dev eth0 proto ra metric 100\n2001:db8::/64 dev eth0 proto kernel metric 256"),
+        );
+
+        assert!(merged
+            .iter()
+            .any(|route| route.family == lazyifconfig::model::RouteFamily::Ipv6));
+        assert_eq!(merged.len(), 3);
     }
 
     #[tokio::test]

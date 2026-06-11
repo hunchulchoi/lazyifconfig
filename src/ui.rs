@@ -415,7 +415,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let details_inner = details_block.inner(top_chunks[1]);
     frame.render_widget(details_block, top_chunks[1]);
 
-    if let Some(selected_item) = app.navigation_items.get(app.selected_index) {
+    if app.view_mode == ViewMode::Routes {
+        render_route_inspector_details(frame, app, details_inner);
+    } else if let Some(selected_item) = app.navigation_items.get(app.selected_index) {
         match selected_item {
             NavigationItem::SubnetHeader(subnet) => {
                 let mut details_text = String::new();
@@ -919,9 +921,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                     .scroll((app.details_scroll, 0));
                 frame.render_widget(details_p, details_inner);
             }
-            NavigationItem::Route { .. } => {
-                render_route_inspector_details(frame, app, details_inner);
-            }
+            NavigationItem::Route { .. } => {}
         }
     } else {
         let details_p = Paragraph::new("No data collected yet. Press 'r' to refresh.")
@@ -1864,7 +1864,7 @@ fn route_table_detail_lines(app: &App) -> Vec<Line<'static>> {
         return lines;
     }
 
-    for route in &snapshot.routes {
+    for (_, route) in app.filtered_sorted_routes() {
         let text = format!(
             "{:<18} {:<16} {:<10} {:<7} {:<7} {:<7} {}",
             route.destination,
@@ -2162,6 +2162,43 @@ mod tests {
         assert!(rendered.contains("Diagnostics"));
         assert!(rendered.contains("Route interface is down"));
         assert!(rendered.contains("Recommendation"));
+    }
+
+    #[test]
+    fn test_ui_draw_routes_details_without_selected_route() {
+        let mut app = App {
+            view_mode: ViewMode::Routes,
+            current_snapshot: Some(NetworkSnapshot::default()),
+            ..Default::default()
+        };
+        app.route_inspector.active_section = RouteInspectorSection::Summary;
+        app.update_navigation_items();
+
+        let rendered = draw_to_string(&mut app);
+
+        assert!(rendered.contains("Route Summary"));
+        assert!(rendered.contains("No default route"));
+        assert!(!rendered.contains("No data collected yet"));
+    }
+
+    #[test]
+    fn test_route_table_detail_uses_active_filter() {
+        let mut app = route_test_app(RouteInspectorSection::RouteTable);
+        app.route_inspector.route_filter = "utun4".to_string();
+        app.update_navigation_items();
+
+        let rendered = route_table_detail_lines(&app)
+            .into_iter()
+            .flat_map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<String>();
+
+        assert!(rendered.contains("10.8.0.0/24"));
+        assert!(!rendered.contains("192.168.0.1"));
     }
 
     #[test]

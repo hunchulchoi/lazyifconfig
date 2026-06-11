@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::model::{
     CommandOutput, CommandSourceId, NetworkEvent, NetworkInterface, NetworkSnapshot, PublicIpInfo,
-    RouteDiagnostic, RouteInspectorSection, RoutePathResult, RouteSortColumn, Subnet,
+    RouteDiagnostic, RouteEntry, RouteInspectorSection, RoutePathResult, RouteSortColumn, Subnet,
 };
 use crate::update::{AvailableUpdate, UpdateMessage, UpdateStatus};
 
@@ -351,6 +351,38 @@ impl App {
             );
     }
 
+    pub fn filtered_sorted_routes(&self) -> Vec<(usize, &RouteEntry)> {
+        let Some(snapshot) = &self.current_snapshot else {
+            return Vec::new();
+        };
+
+        let query = self.route_inspector.route_filter.to_lowercase();
+        let mut routes: Vec<(usize, &RouteEntry)> = snapshot
+            .routes
+            .iter()
+            .enumerate()
+            .filter(|(_, route)| {
+                query.is_empty()
+                    || route.destination.to_lowercase().contains(&query)
+                    || route.gateway.to_lowercase().contains(&query)
+                    || route.interface.to_lowercase().contains(&query)
+            })
+            .collect();
+
+        match self.route_inspector.sort_column {
+            RouteSortColumn::Destination => {
+                routes.sort_by(|(_, a), (_, b)| a.destination.cmp(&b.destination))
+            }
+            RouteSortColumn::Gateway => routes.sort_by(|(_, a), (_, b)| a.gateway.cmp(&b.gateway)),
+            RouteSortColumn::Interface => {
+                routes.sort_by(|(_, a), (_, b)| a.interface.cmp(&b.interface))
+            }
+            RouteSortColumn::Metric => routes.sort_by_key(|(_, route)| route.metric),
+        }
+
+        routes
+    }
+
     pub fn select_next_route_section(&mut self) {
         self.route_inspector.active_section = match self.route_inspector.active_section {
             RouteInspectorSection::Summary => RouteInspectorSection::PathViewer,
@@ -516,36 +548,8 @@ impl App {
                     .collect();
             }
             ViewMode::Routes => {
-                let snapshot = snapshot.unwrap();
-                let query = self.route_inspector.route_filter.to_lowercase();
-                let mut routes: Vec<(usize, &crate::model::RouteEntry)> = snapshot
-                    .routes
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, route)| {
-                        query.is_empty()
-                            || route.destination.to_lowercase().contains(&query)
-                            || route.gateway.to_lowercase().contains(&query)
-                            || route.interface.to_lowercase().contains(&query)
-                    })
-                    .collect();
-
-                match self.route_inspector.sort_column {
-                    RouteSortColumn::Destination => {
-                        routes.sort_by(|(_, a), (_, b)| a.destination.cmp(&b.destination))
-                    }
-                    RouteSortColumn::Gateway => {
-                        routes.sort_by(|(_, a), (_, b)| a.gateway.cmp(&b.gateway))
-                    }
-                    RouteSortColumn::Interface => {
-                        routes.sort_by(|(_, a), (_, b)| a.interface.cmp(&b.interface))
-                    }
-                    RouteSortColumn::Metric => {
-                        routes.sort_by(|(_, a), (_, b)| a.metric.cmp(&b.metric))
-                    }
-                }
-
-                self.navigation_items = routes
+                self.navigation_items = self
+                    .filtered_sorted_routes()
                     .into_iter()
                     .map(|(idx, r)| NavigationItem::Route {
                         destination: r.destination.clone(),
