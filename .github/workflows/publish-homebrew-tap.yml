@@ -58,11 +58,16 @@ jobs:
     needs: resolve-release
     uses: choihunchul/github--actions/.github/workflows/publish-homebrew-formula.yml@main
     with:
-      source-repo: ${{ github.repository }}
+      release-repo: ${{ github.repository }}
       tap-repo: choihunchul/homebrew-tap
       formula-name: lazyifconfig
       desc: Terminal UI for inspecting local network state
-      homepage: https://github.com/choihunchol/lazyifconfig
+      homepage: https://github.com/choihunchul/lazyifconfig
+      license: MIT
+      binary-name: lazyifconfig
+      asset-macos-intel: lazyifconfig-{tag}-x86_64-apple-darwin.tar.gz
+      asset-macos-arm: lazyifconfig-{tag}-aarch64-apple-darwin.tar.gz
+      asset-linux-intel: lazyifconfig-{tag}-x86_64-unknown-linux-gnu.tar.gz
       tag: ${{ needs.resolve-release.outputs.tag }}
       verify-tag: false
     secrets:
