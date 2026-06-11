@@ -20,24 +20,27 @@ It combines local interface, route, connection, port, and public IP data into a 
 - Interface view with IPv4 and IPv6 details
 - Network grouping by subnet
 - Active connection list from `netstat -an`
-- Listening port list from `lsof` on macOS and `ss` on Linux
+- Listening port list from `lsof` on macOS, `ss` on Linux, and `netstat` on Windows
 - Port and connection detail tabs with focused summaries, process/WHOIS drilldowns, and shared keyboard navigation
 - Route Inspector with default route summary, destination path lookup, VPN route detection, diagnostics, raw route output, and a sortable/filterable route table
 - Tools input modal with muted placeholders, focused-field highlighting, and empty-input warnings
-- On-demand Tools Hub commands for DNS, Whois, IP info, port check, TLS, ping, and traceroute
+- On-demand Tools Hub commands for DNS, Whois/RDAP, IP info, port check, TLS, ping, and traceroute
 - Event timeline for interface and public IP changes
 - Raw command output capture inside the app
 - Background GitHub Release check with self-update support
 
 ## Requirements
 
-- macOS or Linux
+- macOS, Linux, or Windows
 - Rust toolchain
 - System commands available in `PATH`:
-  - macOS: `ifconfig`, `netstat`, `route`
-  - Linux: `ip`, `netstat`, `ss`
-  - macOS: `lsof`
-  - `curl`
+  - macOS: `ifconfig`, `netstat`, `route`, `lsof`, `ping`, `traceroute`
+  - Linux: `ip`, `netstat`, `ss`, `ping`, `traceroute`
+  - Windows: `ipconfig`, `route`, `netstat`, `ping`, `tracert`, `nslookup`, `clip`, `taskkill`
+  - All platforms: `curl` for public IP, RDAP/WHOIS fallback, release checks, and self-update
+
+Tools Hub uses native Rust for TLS inspection, so `openssl` is not required.
+On Windows, DNS and reverse DNS use `nslookup`, Whois uses RDAP over HTTPS, and traceroute uses `tracert`.
 
 ## Install
 
@@ -202,6 +205,9 @@ The release workflow builds and uploads artifacts for:
 ## Notes
 
 - Linux interface and route views use `ip`, and the port view uses `ss`; the connection view still relies on `netstat`.
+- Windows interface and route views use `ipconfig` and `route PRINT`; port and connection views use `netstat`.
+- Whois lookups fall back to RDAP over HTTPS when a local `whois` command is missing. On Windows, RDAP is used directly.
+- TLS inspection is implemented with Rust TLS libraries and does not shell out to `openssl`.
 - Public IP information is fetched from `https://ipinfo.io/json`.
 
 ## Project Rules
