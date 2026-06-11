@@ -530,6 +530,44 @@ fn route_diagnostics_refresh_when_snapshot_is_replaced() {
 }
 
 #[test]
+fn route_diagnostics_use_down_interfaces_when_show_all_is_false() {
+    let mut app = App::default();
+
+    app.replace_snapshot(NetworkSnapshot {
+        interfaces: vec![interface_with_status(
+            "en0",
+            InterfaceStatus::Down,
+            Some("192.168.0.10"),
+            None,
+        )],
+        connections: vec![],
+        listening_ports: vec![],
+        routes: vec![lazyifconfig::model::RouteEntry::new("default", "192.168.0.1", "en0")],
+        captured_at_secs: 10,
+    });
+
+    assert!(app
+        .route_inspector
+        .diagnostics
+        .iter()
+        .any(|item| item.title == "Route interface is down"));
+}
+
+#[test]
+fn route_filter_clears_when_leaving_routes_view() {
+    let mut app = App::default();
+
+    app.route_inspector.route_filter = "utun".to_string();
+    app.route_inspector.route_filter_active = true;
+
+    app.set_view_mode(lazyifconfig::app::ViewMode::Routes);
+    app.set_view_mode(lazyifconfig::app::ViewMode::Interface);
+
+    assert!(app.route_inspector.route_filter.is_empty());
+    assert!(!app.route_inspector.route_filter_active);
+}
+
+#[test]
 fn test_raw_viewer_search_highlights() {
     let mut app = App::default();
     let source_id = lazyifconfig::model::CommandSourceId::Ifconfig;

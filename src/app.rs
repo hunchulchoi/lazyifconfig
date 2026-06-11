@@ -178,6 +178,11 @@ impl Default for App {
 
 impl App {
     pub fn replace_snapshot(&mut self, mut snapshot: NetworkSnapshot) {
+        let route_diagnostics = crate::route_inspector::diagnostics::build_route_diagnostics(
+            &snapshot.routes,
+            &snapshot.interfaces,
+        );
+
         if !self.show_all {
             snapshot.interfaces.retain(|interface| interface.status == crate::model::InterfaceStatus::Up);
         }
@@ -223,7 +228,7 @@ impl App {
         }
 
         self.push_generated_events();
-        self.refresh_route_diagnostics();
+        self.route_inspector.diagnostics = route_diagnostics;
         self.update_navigation_items();
         self.restore_selection(selected_name.as_deref());
     }
@@ -248,6 +253,8 @@ impl App {
         self.details_scroll = 0;
         self.port_filter.clear();
         self.port_filter_active = false;
+        self.route_inspector.route_filter.clear();
+        self.route_inspector.route_filter_active = false;
         self.update_navigation_items();
         self.restore_selection(selected_name.as_deref());
     }
