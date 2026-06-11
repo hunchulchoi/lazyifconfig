@@ -17,17 +17,37 @@ It combines local interface, route, connection, port, and public IP data into a 
 
 ## Features
 
-- Interface view with IPv4 and IPv6 details
-- Network grouping by subnet
-- Active connection list from `netstat -an`
-- Listening port list from `lsof` on macOS, `ss` on Linux, and `netstat` on Windows
-- Port and connection detail tabs with focused summaries, process/WHOIS drilldowns, and shared keyboard navigation
-- Route Inspector with default route summary, destination path lookup, VPN route detection, diagnostics, raw route output, and a sortable/filterable route table
-- Tools input modal with muted placeholders, focused-field highlighting, and empty-input warnings
-- On-demand Tools Hub commands for DNS, Whois/RDAP, IP info, port check, TLS, ping, and traceroute
-- Event timeline for interface and public IP changes
-- Raw command output capture inside the app
-- Background GitHub Release check with self-update support
+- Interface inventory: shows interface name, status, type, MAC address, MTU, IPv4/IPv6 addresses, prefixes, gateways, and traffic counters when the platform exposes them.
+- Network view: groups interfaces by subnet so LAN, loopback, VPN, container, link-local, public, and unassigned networks are easier to scan.
+- Connections view: lists active local and remote endpoints from `netstat -an`, with sorting, filtering, copy actions, and per-connection details.
+- Ports view: lists listening TCP ports from `lsof` on macOS, `ss` on Linux, and `netstat` on Windows, with process details and a kill action.
+- Route Inspector: summarizes default routes, route tables, route diagnostics, VPN route hints, and raw route command output.
+- Destination path lookup: checks how a destination would be routed and renders a compact path view with interface, gateway, source IP, and VPN indication when available.
+- Diagnostics: flags missing default routes, multiple defaults, down interfaces used by routes, missing interfaces, and route metric conflicts.
+- Timeline: records local in-app events for interface appearance/removal, address changes, status changes, VPN-related changes, public IP changes, copy actions, and update checks.
+- Tools Hub: runs DNS lookup, Whois/RDAP lookup, IP information, TCP port check, TLS inspection, ping, and traceroute from the TUI or directly from the CLI.
+- DNS and IP information: resolves DNS records, reverse DNS, ASN/organization/country metadata where available, and uses Windows-native `nslookup` on Windows.
+- TLS Inspector: connects with native Rust TLS libraries and reports protocol, cipher suite, certificate subject/issuer, validity, SANs, and certificate count.
+- Raw output viewer: stores the command output used to build each view so the rendered summary can be compared with the source command output.
+- Self-update support: checks GitHub Releases in the background and can install a matching release artifact when available.
+
+## Privacy
+
+`lazyifconfig` does not collect telemetry, does not track users, does not phone home for analytics, and does not upload local interface, route, port, connection, or process data to a project-owned service.
+There is no account system, no background analytics SDK, no usage reporting, and no hidden data collection.
+
+Most views are built from local operating-system commands and parsed in memory.
+Raw command output is kept inside the running app for inspection and is not sent anywhere by `lazyifconfig`.
+Timeline exports are written only when you press `S`, and they are saved to a local file in the current directory.
+
+Some features intentionally contact external services when enabled or invoked:
+
+- Public IP lookup requests `https://ipinfo.io/json`.
+- Release checks request the GitHub Releases API for this repository.
+- Whois/RDAP fallback requests RDAP endpoints over HTTPS when local Whois is unavailable, and Windows uses RDAP directly.
+- Tools Hub commands such as DNS, ping, traceroute, port check, TLS inspection, Whois/RDAP, and IP info contact the target host or resolver needed to perform the requested lookup.
+
+Those requests are part of the feature being run; `lazyifconfig` itself still does not collect, retain, sell, or transmit telemetry.
 
 ## Requirements
 
