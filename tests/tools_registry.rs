@@ -36,19 +36,31 @@ fn registry_marks_all_tools_runnable() {
         ToolAvailability::Runnable
     );
     assert_eq!(
-        registry.definition(ToolId::WhoisLookup).unwrap().availability,
+        registry
+            .definition(ToolId::WhoisLookup)
+            .unwrap()
+            .availability,
         ToolAvailability::Runnable
     );
     assert_eq!(
-        registry.definition(ToolId::IpInformation).unwrap().availability,
+        registry
+            .definition(ToolId::IpInformation)
+            .unwrap()
+            .availability,
         ToolAvailability::Runnable
     );
     assert_eq!(
-        registry.definition(ToolId::TlsInspector).unwrap().availability,
+        registry
+            .definition(ToolId::TlsInspector)
+            .unwrap()
+            .availability,
         ToolAvailability::Runnable
     );
     assert_eq!(
-        registry.definition(ToolId::Traceroute).unwrap().availability,
+        registry
+            .definition(ToolId::Traceroute)
+            .unwrap()
+            .availability,
         ToolAvailability::Runnable
     );
 }

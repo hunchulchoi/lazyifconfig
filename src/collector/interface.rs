@@ -5,6 +5,10 @@ use crate::model::{
 };
 
 pub fn parse_interfaces(input: &str) -> Vec<NetworkInterface> {
+    if input.contains("Windows IP Configuration") {
+        return parse_windows_ipconfig(input);
+    }
+
     let mut interfaces = Vec::new();
     let mut current: Option<NetworkInterface> = None;
 
@@ -105,6 +109,139 @@ pub fn parse_interfaces(input: &str) -> Vec<NetworkInterface> {
     }
 
     interfaces
+}
+
+fn parse_windows_ipconfig(input: &str) -> Vec<NetworkInterface> {
+    let mut interfaces = Vec::new();
+    let mut current: Option<NetworkInterface> = None;
+    let mut pending_v4_prefix: Option<usize> = None;
+
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if !line.starts_with(' ') && trimmed.ends_with(':') && trimmed.contains("adapter") {
+            if let Some(interface) = current.take() {
+                interfaces.push(finalize_windows_interface(interface));
+            }
+
+            let name = trimmed
+                .trim_end_matches(':')
+                .split_once("adapter")
+                .map(|(_, value)| value.trim())
+                .filter(|value| !value.is_empty())
+                .unwrap_or(trimmed.trim_end_matches(':'))
+                .to_string();
+
+            current = Some(NetworkInterface {
+                interface_type: infer_interface_type(&name),
+                network_kind: NetworkKind::Unknown,
+                status: InterfaceStatus::Up,
+                mtu: None,
+                name,
+                ipv4: Vec::new(),
+                ipv6: Vec::new(),
+                mac_address: None,
+                stats: None,
+            });
+            pending_v4_prefix = None;
+            continue;
+        }
+
+        let Some(interface) = current.as_mut() else {
+            continue;
+        };
+
+        if let Some(value) = windows_field_value(trimmed, "Media State") {
+            if value.contains("disconnected") {
+                interface.status = InterfaceStatus::Down;
+            }
+        } else if let Some(value) = windows_field_value(trimmed, "Physical Address") {
+            interface.mac_address = Some(value.replace('-', ":").to_lowercase());
+        } else if let Some(value) = windows_field_value(trimmed, "IPv4 Address") {
+            let clean = clean_windows_address(value);
+            interface.ipv4.push(InterfaceAddress {
+                value: clean,
+                prefix_len: None,
+                gateway: None,
+            });
+            pending_v4_prefix = interface.ipv4.len().checked_sub(1);
+        } else if let Some(value) = windows_field_value(trimmed, "Subnet Mask") {
+            if let (Some(index), Some(prefix)) = (pending_v4_prefix, dotted_mask_prefix(value)) {
+                if let Some(addr) = interface.ipv4.get_mut(index) {
+                    addr.prefix_len = Some(prefix);
+                }
+            }
+        } else if let Some(value) = windows_field_value(trimmed, "IPv6 Address") {
+            interface.ipv6.push(InterfaceAddress {
+                value: clean_windows_address(value),
+                prefix_len: None,
+                gateway: None,
+            });
+        } else if let Some(value) = windows_field_value(trimmed, "Link-local IPv6 Address") {
+            interface.ipv6.push(InterfaceAddress {
+                value: clean_windows_address(value),
+                prefix_len: Some(64),
+                gateway: None,
+            });
+        } else if let Some(value) = windows_field_value(trimmed, "Default Gateway") {
+            let gateway = clean_windows_address(value);
+            if gateway.is_empty() {
+                continue;
+            }
+            if gateway.contains(':') {
+                for addr in &mut interface.ipv6 {
+                    if addr.gateway.is_none() {
+                        addr.gateway = Some(gateway.clone());
+                    }
+                }
+            } else {
+                for addr in &mut interface.ipv4 {
+                    if addr.gateway.is_none() {
+                        addr.gateway = Some(gateway.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(interface) = current {
+        interfaces.push(finalize_windows_interface(interface));
+    }
+
+    interfaces
+}
+
+fn finalize_windows_interface(mut interface: NetworkInterface) -> NetworkInterface {
+    interface.network_kind = classify_interface(&interface.name, &interface.ipv4, &interface.ipv6);
+    interface
+}
+
+fn windows_field_value<'a>(line: &'a str, field: &str) -> Option<&'a str> {
+    let (left, right) = line.split_once(':')?;
+    left.trim()
+        .starts_with(field)
+        .then_some(right.trim())
+        .filter(|value| !value.is_empty())
+}
+
+fn clean_windows_address(value: &str) -> String {
+    value
+        .split('(')
+        .next()
+        .unwrap_or(value)
+        .split('%')
+        .next()
+        .unwrap_or(value)
+        .trim()
+        .to_string()
+}
+
+fn dotted_mask_prefix(value: &str) -> Option<u8> {
+    let mask = value.trim().parse::<std::net::Ipv4Addr>().ok()?;
+    Some(u32::from(mask).count_ones() as u8)
 }
 
 fn parse_hex_netmask(hex_str: &str) -> Option<u8> {
@@ -361,5 +498,59 @@ pub fn merge_gateways(interfaces: &mut [NetworkInterface], netstat_output: &str)
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_windows_ipconfig_output() {
+        let input = "\
+Windows IP Configuration
+
+Ethernet adapter Ethernet:
+
+   Connection-specific DNS Suffix  . : lan
+   Physical Address. . . . . . . . . : AA-BB-CC-DD-EE-FF
+   DHCP Enabled. . . . . . . . . . . : Yes
+   IPv6 Address. . . . . . . . . . . : 2001:4860::8888(Preferred)
+   Link-local IPv6 Address . . . . . : fe80::abcd:1%12(Preferred)
+   IPv4 Address. . . . . . . . . . . : 192.168.1.42(Preferred)
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . : 192.168.1.1
+
+Wireless LAN adapter Wi-Fi:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Physical Address. . . . . . . . . : 11-22-33-44-55-66
+";
+
+        let interfaces = parse_interfaces(input);
+
+        assert_eq!(interfaces.len(), 2);
+        assert_eq!(interfaces[0].name, "Ethernet");
+        assert_eq!(interfaces[0].status, InterfaceStatus::Up);
+        assert_eq!(
+            interfaces[0].mac_address.as_deref(),
+            Some("aa:bb:cc:dd:ee:ff")
+        );
+        assert_eq!(interfaces[0].ipv4[0].value, "192.168.1.42");
+        assert_eq!(interfaces[0].ipv4[0].prefix_len, Some(24));
+        assert_eq!(
+            interfaces[0].ipv4[0].gateway.as_deref(),
+            Some("192.168.1.1")
+        );
+        assert_eq!(interfaces[0].ipv6[0].value, "2001:4860::8888");
+        assert_eq!(interfaces[0].ipv6[1].value, "fe80::abcd:1");
+        assert_eq!(interfaces[0].network_kind, NetworkKind::LinkLocal);
+
+        assert_eq!(interfaces[1].name, "Wi-Fi");
+        assert_eq!(interfaces[1].status, InterfaceStatus::Down);
+        assert_eq!(
+            interfaces[1].mac_address.as_deref(),
+            Some("11:22:33:44:55:66")
+        );
     }
 }

@@ -8,6 +8,9 @@ pub fn parse_routes(netstat_output: &str) -> Vec<RouteEntry> {
     if netstat_output.lines().any(is_linux_ip_route_line) {
         return parse_linux_ip_routes(netstat_output);
     }
+    if looks_like_windows_route_print(netstat_output) {
+        return parse_windows_route_print(netstat_output);
+    }
 
     let mut routes = Vec::new();
     let mut family = RouteFamily::Unknown;
@@ -46,6 +49,111 @@ pub fn parse_routes(netstat_output: &str) -> Vec<RouteEntry> {
         }
     }
     routes
+}
+
+fn looks_like_windows_route_print(input: &str) -> bool {
+    input.contains("IPv4 Route Table") || input.contains("Active Routes:")
+}
+
+fn parse_windows_route_print(input: &str) -> Vec<RouteEntry> {
+    let mut routes = Vec::new();
+    let mut family = RouteFamily::Unknown;
+    let mut in_active_routes = false;
+    let mut pending_ipv6: Option<(String, Option<u32>, String)> = None;
+
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("IPv4 Route Table") {
+            family = RouteFamily::Ipv4;
+            in_active_routes = false;
+            pending_ipv6 = None;
+            continue;
+        }
+        if trimmed.starts_with("IPv6 Route Table") {
+            family = RouteFamily::Ipv6;
+            in_active_routes = false;
+            pending_ipv6 = None;
+            continue;
+        }
+        if trimmed.starts_with("Active Routes:") {
+            in_active_routes = true;
+            continue;
+        }
+        if trimmed.starts_with("Persistent Routes:") {
+            in_active_routes = false;
+            continue;
+        }
+        if !in_active_routes
+            || trimmed.is_empty()
+            || trimmed.starts_with("Network")
+            || trimmed.starts_with("If ")
+            || trimmed.starts_with('=')
+        {
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if let (RouteFamily::Ipv6, Some((interface, metric, destination))) =
+            (&family, pending_ipv6.take())
+        {
+            if parts.len() == 1 {
+                let mut route = RouteEntry::new(destination, parts[0].to_string(), interface);
+                route.metric = metric;
+                route.family = RouteFamily::Ipv6;
+                routes.push(route);
+                continue;
+            }
+        }
+
+        match family {
+            RouteFamily::Ipv4 if parts.len() >= 5 => {
+                let destination = if parts[0] == "0.0.0.0" && parts[1] == "0.0.0.0" {
+                    "default".to_string()
+                } else {
+                    format!(
+                        "{}/{}",
+                        parts[0],
+                        ipv4_mask_to_prefix(parts[1]).unwrap_or(32)
+                    )
+                };
+                let gateway = parts[2].to_string();
+                let interface = parts[3].to_string();
+                let mut route = RouteEntry::new(destination, gateway, interface);
+                route.metric = parts[4].parse().ok();
+                route.family = RouteFamily::Ipv4;
+                routes.push(route);
+            }
+            RouteFamily::Ipv6 if parts.len() >= 4 => {
+                let destination = if parts[2] == "::/0" {
+                    "default".to_string()
+                } else {
+                    parts[2].to_string()
+                };
+                let gateway = parts.get(3).copied().unwrap_or("link").to_string();
+                let interface = parts[0].to_string();
+                let mut route = RouteEntry::new(destination, gateway, interface);
+                route.metric = parts[1].parse().ok();
+                route.family = RouteFamily::Ipv6;
+                routes.push(route);
+            }
+            RouteFamily::Ipv6 if parts.len() == 3 => {
+                let destination = if parts[2] == "::/0" {
+                    "default".to_string()
+                } else {
+                    parts[2].to_string()
+                };
+                pending_ipv6 = Some((parts[0].to_string(), parts[1].parse().ok(), destination));
+            }
+            _ => {}
+        }
+    }
+
+    routes
+}
+
+fn ipv4_mask_to_prefix(mask: &str) -> Option<u8> {
+    let mask = mask.parse::<std::net::Ipv4Addr>().ok()?;
+    Some(u32::from(mask).count_ones() as u8)
 }
 
 fn parse_linux_ip_routes(input: &str) -> Vec<RouteEntry> {
@@ -221,5 +329,54 @@ default via 172.17.0.1 dev eth0 proto static
         assert_eq!(routes[2].destination, "10.8.0.0/24");
         assert_eq!(routes[2].gateway, "10.8.0.1");
         assert_eq!(routes[2].interface, "tun0");
+    }
+
+    #[test]
+    fn test_parse_windows_route_print() {
+        let sample = "\
+===========================================================================
+Interface List
+ 12...aa bb cc dd ee ff ......Intel(R) Ethernet
+===========================================================================
+
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.42     25
+        127.0.0.0        255.0.0.0         On-link       127.0.0.1    331
+      192.168.1.0    255.255.255.0         On-link     192.168.1.42    281
+===========================================================================
+IPv6 Route Table
+===========================================================================
+Active Routes:
+ If Metric Network Destination      Gateway
+ 12    281 ::/0                     fe80::1
+ 12    281 2001:4860::8888/128
+                                    On-link
+  1    331 ::1/128                  On-link
+";
+
+        let routes = parse_routes(sample);
+
+        assert_eq!(routes.len(), 6);
+        assert_eq!(routes[0].destination, "default");
+        assert_eq!(routes[0].gateway, "192.168.1.1");
+        assert_eq!(routes[0].interface, "192.168.1.42");
+        assert_eq!(routes[0].metric, Some(25));
+        assert_eq!(routes[0].family, RouteFamily::Ipv4);
+
+        assert_eq!(routes[2].destination, "192.168.1.0/24");
+        assert_eq!(routes[2].gateway, "On-link");
+
+        assert_eq!(routes[3].destination, "default");
+        assert_eq!(routes[3].gateway, "fe80::1");
+        assert_eq!(routes[3].interface, "12");
+        assert_eq!(routes[3].metric, Some(281));
+        assert_eq!(routes[3].family, RouteFamily::Ipv6);
+
+        assert_eq!(routes[4].destination, "2001:4860::8888/128");
+        assert_eq!(routes[4].gateway, "On-link");
+        assert_eq!(routes[4].interface, "12");
     }
 }

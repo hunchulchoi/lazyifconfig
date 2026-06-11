@@ -70,11 +70,14 @@ fn dns_command_candidates_prefer_dig() {
 fn ping_command_uses_small_count_per_platform() {
     let mac = lazyifconfig::tools::ping::command_spec_for_os("macos", "8.8.8.8");
     let linux = lazyifconfig::tools::ping::command_spec_for_os("linux", "8.8.8.8");
+    let windows = lazyifconfig::tools::ping::command_spec_for_os("windows", "8.8.8.8");
 
     assert_eq!(mac.program, "ping");
     assert_eq!(mac.args, vec!["-c", "4", "8.8.8.8"]);
     assert_eq!(linux.program, "ping");
     assert_eq!(linux.args, vec!["-c", "4", "8.8.8.8"]);
+    assert_eq!(windows.program, "ping");
+    assert_eq!(windows.args, vec!["-n", "4", "8.8.8.8"]);
 }
 
 #[test]
@@ -116,24 +119,42 @@ fn tls_command_uses_sni_for_host_and_port() {
 fn traceroute_command_uses_platform_specific_flags() {
     let mac = lazyifconfig::tools::traceroute::command_spec_for_os("macos", "8.8.8.8");
     let linux = lazyifconfig::tools::traceroute::command_spec_for_os("linux", "8.8.8.8");
+    let windows = lazyifconfig::tools::traceroute::command_spec_for_os("windows", "8.8.8.8");
 
     assert_eq!(mac.program, "traceroute");
     assert_eq!(mac.args, vec!["-m", "8", "8.8.8.8"]);
     assert_eq!(linux.program, "traceroute");
     assert_eq!(linux.args, vec!["-m", "8", "-w", "1", "8.8.8.8"]);
+    assert_eq!(windows.program, "tracert");
+    assert_eq!(windows.args, vec!["-h", "8", "8.8.8.8"]);
 }
 
 #[test]
 fn cli_tool_ids_cover_all_runnable_tools() {
-    assert_eq!(lazyifconfig::tools::tool_id_from_cli_name("dns"), Some(ToolId::DnsLookup));
-    assert_eq!(lazyifconfig::tools::tool_id_from_cli_name("whois"), Some(ToolId::WhoisLookup));
-    assert_eq!(lazyifconfig::tools::tool_id_from_cli_name("ip-info"), Some(ToolId::IpInformation));
+    assert_eq!(
+        lazyifconfig::tools::tool_id_from_cli_name("dns"),
+        Some(ToolId::DnsLookup)
+    );
+    assert_eq!(
+        lazyifconfig::tools::tool_id_from_cli_name("whois"),
+        Some(ToolId::WhoisLookup)
+    );
+    assert_eq!(
+        lazyifconfig::tools::tool_id_from_cli_name("ip-info"),
+        Some(ToolId::IpInformation)
+    );
     assert_eq!(
         lazyifconfig::tools::tool_id_from_cli_name("port-check"),
         Some(ToolId::PortCheck)
     );
-    assert_eq!(lazyifconfig::tools::tool_id_from_cli_name("tls"), Some(ToolId::TlsInspector));
-    assert_eq!(lazyifconfig::tools::tool_id_from_cli_name("ping"), Some(ToolId::Ping));
+    assert_eq!(
+        lazyifconfig::tools::tool_id_from_cli_name("tls"),
+        Some(ToolId::TlsInspector)
+    );
+    assert_eq!(
+        lazyifconfig::tools::tool_id_from_cli_name("ping"),
+        Some(ToolId::Ping)
+    );
     assert_eq!(
         lazyifconfig::tools::tool_id_from_cli_name("traceroute"),
         Some(ToolId::Traceroute)
@@ -143,7 +164,8 @@ fn cli_tool_ids_cover_all_runnable_tools() {
 
 #[test]
 fn cli_argument_mapping_matches_tool_fields() {
-    let dns = lazyifconfig::tools::tool_input_from_cli_args(ToolId::DnsLookup, &["example.com"]).unwrap();
+    let dns =
+        lazyifconfig::tools::tool_input_from_cli_args(ToolId::DnsLookup, &["example.com"]).unwrap();
     assert_eq!(dns.get("target"), Some("example.com"));
 
     let port =
@@ -160,8 +182,8 @@ fn cli_argument_mapping_matches_tool_fields() {
 
 #[test]
 fn cli_argument_mapping_rejects_wrong_arity() {
-    let err =
-        lazyifconfig::tools::tool_input_from_cli_args(ToolId::PortCheck, &["github.com"]).unwrap_err();
+    let err = lazyifconfig::tools::tool_input_from_cli_args(ToolId::PortCheck, &["github.com"])
+        .unwrap_err();
     assert!(err.contains("Usage"));
     assert!(err.contains("port-check <host> <port>"));
 }

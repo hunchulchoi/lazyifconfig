@@ -58,6 +58,12 @@ pub fn interface_command_spec_for_os(os: &str) -> CommandSpec {
             program: "ip",
             args: &["-details", "-statistics", "address", "show"],
         }
+    } else if os == "windows" {
+        CommandSpec {
+            display: "ipconfig /all",
+            program: "ipconfig",
+            args: &["/all"],
+        }
     } else {
         CommandSpec {
             display: "ifconfig",
@@ -73,6 +79,12 @@ pub fn route_table_command_spec_for_os(os: &str) -> CommandSpec {
             display: "ip route show",
             program: "ip",
             args: &["route", "show"],
+        }
+    } else if os == "windows" {
+        CommandSpec {
+            display: "route PRINT",
+            program: "route",
+            args: &["PRINT"],
         }
     } else {
         CommandSpec {
@@ -90,6 +102,12 @@ pub fn default_route_command_spec_for_os(os: &str) -> CommandSpec {
             program: "ip",
             args: &["route", "show", "default"],
         }
+    } else if os == "windows" {
+        CommandSpec {
+            display: "route PRINT 0.0.0.0",
+            program: "route",
+            args: &["PRINT", "0.0.0.0"],
+        }
     } else {
         CommandSpec {
             display: "route -n get default",
@@ -105,6 +123,12 @@ pub fn listening_ports_command_spec_for_os(os: &str) -> CommandSpec {
             display: "ss -H -ltnp",
             program: "ss",
             args: &["-H", "-ltnp"],
+        }
+    } else if os == "windows" {
+        CommandSpec {
+            display: "netstat -ano -p tcp",
+            program: "netstat",
+            args: &["-ano", "-p", "tcp"],
         }
     } else {
         CommandSpec {
@@ -125,6 +149,12 @@ pub fn route_path_command_spec_for_os(os: &str, destination: &str) -> OwnedComma
                 "get".to_string(),
                 destination.to_string(),
             ],
+        }
+    } else if os == "windows" {
+        OwnedCommandSpec {
+            display: format!("route PRINT {destination}"),
+            program: "route".to_string(),
+            args: vec!["PRINT".to_string(), destination.to_string()],
         }
     } else {
         OwnedCommandSpec {
@@ -359,6 +389,15 @@ mod tests {
     }
 
     #[test]
+    fn interface_command_uses_ipconfig_on_windows() {
+        let command = interface_command_spec_for_os("windows");
+
+        assert_eq!(command.display, "ipconfig /all");
+        assert_eq!(command.program, "ipconfig");
+        assert_eq!(command.args, &["/all"]);
+    }
+
+    #[test]
     fn route_commands_use_ip_on_linux() {
         let routes = route_table_command_spec_for_os("linux");
         let default_route = default_route_command_spec_for_os("linux");
@@ -385,6 +424,19 @@ mod tests {
     }
 
     #[test]
+    fn route_commands_use_windows_tools_on_windows() {
+        let routes = route_table_command_spec_for_os("windows");
+        let default_route = default_route_command_spec_for_os("windows");
+
+        assert_eq!(routes.display, "route PRINT");
+        assert_eq!(routes.program, "route");
+        assert_eq!(routes.args, &["PRINT"]);
+        assert_eq!(default_route.display, "route PRINT 0.0.0.0");
+        assert_eq!(default_route.program, "route");
+        assert_eq!(default_route.args, &["PRINT", "0.0.0.0"]);
+    }
+
+    #[test]
     fn ports_command_uses_ss_on_linux() {
         let command = listening_ports_command_spec_for_os("linux");
 
@@ -403,6 +455,15 @@ mod tests {
     }
 
     #[test]
+    fn ports_command_uses_netstat_on_windows() {
+        let command = listening_ports_command_spec_for_os("windows");
+
+        assert_eq!(command.display, "netstat -ano -p tcp");
+        assert_eq!(command.program, "netstat");
+        assert_eq!(command.args, &["-ano", "-p", "tcp"]);
+    }
+
+    #[test]
     fn route_path_command_uses_ip_route_get_on_linux() {
         let command = route_path_command_spec_for_os("linux", "8.8.8.8");
 
@@ -418,6 +479,15 @@ mod tests {
         assert_eq!(command.display, "route -n get 8.8.8.8");
         assert_eq!(command.program, "route");
         assert_eq!(command.args, vec!["-n", "get", "8.8.8.8"]);
+    }
+
+    #[test]
+    fn route_path_command_uses_route_print_on_windows() {
+        let command = route_path_command_spec_for_os("windows", "8.8.8.8");
+
+        assert_eq!(command.display, "route PRINT 8.8.8.8");
+        assert_eq!(command.program, "route");
+        assert_eq!(command.args, vec!["PRINT", "8.8.8.8"]);
     }
 
     #[test]

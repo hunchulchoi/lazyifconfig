@@ -1,6 +1,10 @@
 use crate::model::ListeningPort;
 
 pub fn parse_listening_ports(input: &str) -> Vec<ListeningPort> {
+    if looks_like_windows_netstat(input) {
+        return parse_windows_netstat_ports(input);
+    }
+
     if input.lines().any(is_ss_socket_row) {
         return parse_ss_listening_ports(input);
     }
@@ -40,6 +44,37 @@ pub fn parse_listening_ports(input: &str) -> Vec<ListeningPort> {
             pid,
             command,
             user,
+        });
+    }
+
+    ports
+}
+
+fn looks_like_windows_netstat(input: &str) -> bool {
+    input.contains("Proto") && input.contains("PID")
+}
+
+fn parse_windows_netstat_ports(input: &str) -> Vec<ListeningPort> {
+    let mut ports = Vec::new();
+
+    for line in input.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 5 || !parts[0].eq_ignore_ascii_case("TCP") {
+            continue;
+        }
+        if !parts[3].eq_ignore_ascii_case("LISTENING") {
+            continue;
+        }
+
+        let (local_ip, local_port) = split_node_name(parts[1]);
+        let pid = parts[4].to_string();
+        ports.push(ListeningPort {
+            proto: "tcp".to_string(),
+            local_ip,
+            local_port,
+            pid: pid.clone(),
+            command: format!("pid:{pid}"),
+            user: "-".to_string(),
         });
     }
 
@@ -219,5 +254,33 @@ LISTEN 0 511 [::]:8080 [::]:* users:((\"nginx\",pid=987,fd=6))
         assert_eq!(ports[2].local_port, "8080");
         assert_eq!(ports[2].command, "nginx");
         assert_eq!(ports[2].pid, "987");
+    }
+
+    #[test]
+    fn parses_windows_netstat_listening_tcp_rows() {
+        let input = "\
+Active Connections
+
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       980
+  TCP    127.0.0.1:3000         0.0.0.0:0              LISTENING       12345
+  TCP    192.168.1.42:50000     93.184.216.34:443      ESTABLISHED     2222
+  TCP    [::]:8080              [::]:0                 LISTENING       777
+";
+
+        let ports = parse_listening_ports(input);
+
+        assert_eq!(ports.len(), 3);
+        assert_eq!(ports[0].proto, "tcp");
+        assert_eq!(ports[0].local_ip, "0.0.0.0");
+        assert_eq!(ports[0].local_port, "135");
+        assert_eq!(ports[0].pid, "980");
+        assert_eq!(ports[0].command, "pid:980");
+        assert_eq!(ports[0].user, "-");
+
+        assert_eq!(ports[1].local_ip, "127.0.0.1");
+        assert_eq!(ports[1].local_port, "3000");
+        assert_eq!(ports[2].local_ip, "::");
+        assert_eq!(ports[2].local_port, "8080");
     }
 }

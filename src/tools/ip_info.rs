@@ -39,7 +39,8 @@ pub async fn run(input: ToolInput) -> Result<ToolResult, String> {
         match run_command(&spec).await {
             Ok((stdout, stderr, _code)) => {
                 raw_chunks.push(format!("$ {}\n{}{}", spec.display, stdout, stderr));
-                reverse_name = parse_reverse_dns_output(&stdout).or_else(|| parse_reverse_dns_output(&stderr));
+                reverse_name =
+                    parse_reverse_dns_output(&stdout).or_else(|| parse_reverse_dns_output(&stderr));
                 if reverse_name.is_some() {
                     break;
                 }
@@ -88,13 +89,20 @@ pub async fn run(input: ToolInput) -> Result<ToolResult, String> {
             format!("IP: {ip}"),
             format!(
                 "Reverse DNS: {}",
-                reverse_name.clone().unwrap_or_else(|| "Unavailable".to_string())
+                reverse_name
+                    .clone()
+                    .unwrap_or_else(|| "Unavailable".to_string())
             ),
             format!(
                 "Organization: {}",
-                organization.clone().unwrap_or_else(|| "Unavailable".to_string())
+                organization
+                    .clone()
+                    .unwrap_or_else(|| "Unavailable".to_string())
             ),
-            format!("ASN: {}", asn.clone().unwrap_or_else(|| "Unavailable".to_string())),
+            format!(
+                "ASN: {}",
+                asn.clone().unwrap_or_else(|| "Unavailable".to_string())
+            ),
             format!(
                 "Country: {}",
                 country.clone().unwrap_or_else(|| "Unavailable".to_string())
@@ -103,15 +111,17 @@ pub async fn run(input: ToolInput) -> Result<ToolResult, String> {
     }];
 
     let whois_sections = parse_whois_output(ip, &whois_stdout, &whois_stderr, whois_code);
-    if let Some(dates) = whois_sections.into_iter().find(|section| section.label == "Dates") {
+    if let Some(dates) = whois_sections
+        .into_iter()
+        .find(|section| section.label == "Dates")
+    {
         sections.push(dates);
     }
 
     let mut diagnostics = Vec::new();
     if reverse_name.is_none() {
-        diagnostics.push(
-            reverse_error.unwrap_or_else(|| "No reverse DNS answer was parsed.".to_string()),
-        );
+        diagnostics
+            .push(reverse_error.unwrap_or_else(|| "No reverse DNS answer was parsed.".to_string()));
     }
     if organization.is_none() && asn.is_none() && country.is_none() {
         diagnostics.push("Whois ownership details were limited for this IP.".to_string());

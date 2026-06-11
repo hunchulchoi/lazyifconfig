@@ -533,9 +533,13 @@ impl App {
         self.route_inspector.route_filter.clear();
         self.route_inspector.route_filter_active = false;
         match self.view_mode {
-            ViewMode::Routes => self.route_inspector.active_section = RouteInspectorSection::Summary,
+            ViewMode::Routes => {
+                self.route_inspector.active_section = RouteInspectorSection::Summary
+            }
             ViewMode::Ports => self.port_details_section = PortDetailsSection::Summary,
-            ViewMode::Connections => self.connection_details_section = ConnectionDetailsSection::Summary,
+            ViewMode::Connections => {
+                self.connection_details_section = ConnectionDetailsSection::Summary
+            }
             _ => {}
         }
         self.update_navigation_items();

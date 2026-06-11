@@ -1,6 +1,14 @@
 use super::{run_command, ToolCommandSpec, ToolInput, ToolResult, ToolResultSection};
 
-pub fn command_spec_for_os(_os: &str, target: &str) -> ToolCommandSpec {
+pub fn command_spec_for_os(os: &str, target: &str) -> ToolCommandSpec {
+    if os == "windows" {
+        return ToolCommandSpec {
+            display: format!("ping -n 4 {target}"),
+            program: "ping".to_string(),
+            args: vec!["-n".to_string(), "4".to_string(), target.to_string()],
+        };
+    }
+
     ToolCommandSpec {
         display: format!("ping -c 4 {target}"),
         program: "ping".to_string(),

@@ -13,6 +13,12 @@ pub fn command_spec_for_os(os: &str, target: &str) -> ToolCommandSpec {
                 target.to_string(),
             ],
         }
+    } else if os == "windows" {
+        ToolCommandSpec {
+            display: format!("tracert -h 8 {target}"),
+            program: "tracert".to_string(),
+            args: vec!["-h".to_string(), "8".to_string(), target.to_string()],
+        }
     } else {
         ToolCommandSpec {
             display: format!("traceroute -m 8 {target}"),
@@ -53,7 +59,8 @@ pub async fn run(input: ToolInput) -> Result<ToolResult, String> {
         diagnostics.push(stderr.trim().to_string());
     }
     if diagnostics.is_empty() && sections.len() == 1 {
-        diagnostics.push("No hop lines were parsed; raw output may contain timeout details.".to_string());
+        diagnostics
+            .push("No hop lines were parsed; raw output may contain timeout details.".to_string());
     }
     if diagnostics.is_empty() {
         diagnostics.push("Traceroute completed with at least one parsed hop.".to_string());
