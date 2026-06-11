@@ -169,6 +169,48 @@ fn tools_input_editing_updates_selected_field() {
 }
 
 #[test]
+fn tools_input_editing_ignores_lines_after_first_when_pasting() {
+    let mut app = App::default();
+    app.set_view_mode(lazyifconfig::app::ViewMode::Tools);
+
+    app.tools.open_input_modal();
+    app.tools.push_input_text("github.com\nsecond-line");
+
+    let value = app
+        .tools
+        .input_for_selected_tool()
+        .get("target")
+        .unwrap()
+        .to_string();
+    assert_eq!(value, "github.com");
+}
+
+#[test]
+fn tools_validation_flags_invalid_port_and_target_formats() {
+    let mut app = App::default();
+    app.set_view_mode(lazyifconfig::app::ViewMode::Tools);
+
+    app.tools.select_next_tool();
+    app.tools.select_next_tool();
+    app.tools.select_next_tool();
+    app.tools.open_input_modal();
+    app.tools.push_input_text("github.com");
+    app.tools.select_next_field();
+    app.tools.push_input_text("70000");
+
+    let errors = app.tools.selected_input_validation_errors();
+    assert!(errors.iter().any(|line| line.contains("Port must be a number from 1 to 65535.")));
+
+    app.tools.select_next_tool();
+    app.tools.open_input_modal();
+    app.tools.push_input_text("github.com:not-a-port");
+    let tls_errors = app.tools.selected_input_validation_errors();
+    assert!(tls_errors
+        .iter()
+        .any(|line| line.contains("Target must look like host:port or host.")));
+}
+
+#[test]
 fn tools_input_modal_tracks_editing_scope() {
     let mut app = App::default();
     app.set_view_mode(lazyifconfig::app::ViewMode::Tools);

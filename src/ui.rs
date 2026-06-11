@@ -1172,14 +1172,21 @@ fn render_tools_view(frame: &mut Frame, app: &App, list_area: Rect, details_area
         ]));
     }
 
-    if tools_input_has_missing_values(definition, selected_input) {
+    let validation_errors = tools_input_validation_errors(app);
+    if !validation_errors.is_empty() {
         input_lines.push(Line::from(""));
         input_lines.push(Line::from(Span::styled(
-            "Warning: fill in the highlighted inputs before running.",
+            "Warning: fix the input issues before running.",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )));
+        for error in &validation_errors {
+            input_lines.push(Line::from(Span::styled(
+                format!("- {error}"),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
     }
 
     if definition.availability == crate::tools::ToolAvailability::Planned {
@@ -1350,14 +1357,21 @@ fn render_tools_input_modal(frame: &mut Frame, app: &App) {
         ]));
     }
 
-    if tools_input_has_missing_values(definition, selected_input) {
+    let validation_errors = tools_input_validation_errors(app);
+    if !validation_errors.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "Warning: fill in the highlighted inputs before running.",
+            "Warning: fix the input issues before running.",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )));
+        for error in &validation_errors {
+            lines.push(Line::from(Span::styled(
+                format!("- {error}"),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
     }
 
     frame.render_widget(
@@ -1374,16 +1388,8 @@ fn render_tools_input_modal(frame: &mut Frame, app: &App) {
     );
 }
 
-fn tools_input_has_missing_values(
-    definition: &crate::tools::ToolDefinition,
-    selected_input: Option<&crate::tools::ToolInput>,
-) -> bool {
-    definition.fields.iter().any(|field| {
-        selected_input
-            .and_then(|input| input.values.get(field.key))
-            .map(|value| value.trim().is_empty())
-            .unwrap_or(true)
-    })
+fn tools_input_validation_errors(app: &App) -> Vec<String> {
+    app.tools.selected_input_validation_errors()
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
@@ -3679,7 +3685,8 @@ mod tests {
             }
         }
 
-        assert!(rendered.contains("Warning: fill in the highlighted inputs before running."));
+        assert!(rendered.contains("Warning: fix the input issues before running."));
+        assert!(rendered.contains("Port is required."));
 
         assert!(rendered.contains("443"));
     }

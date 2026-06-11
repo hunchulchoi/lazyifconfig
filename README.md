@@ -148,8 +148,8 @@ After the same `Release` workflow finishes, the `Publish APT Repository` workflo
 the `amd64` and `arm64` `.deb` assets to `choihunchul/apt-repo`.
 You can also rerun `Publish APT Repository` manually from GitHub Actions by providing a tag such as `0.2.10` or `v0.2.10`.
 
-After the same `Release` workflow finishes, the `Publish WinGet Package` workflow opens a manifest bump pull request
-at `microsoft/winget-pkgs` for the Windows release asset.
+After the same `Release` workflow finishes, the `Publish WinGet Package` workflow opens a WinGet manifest bump PR
+against `microsoft/winget-pkgs` for the matching Windows release asset.
 You can also rerun `Publish WinGet Package` manually from GitHub Actions by providing a tag such as `0.2.10` or `v0.2.10`.
 
 You can also trigger the `Create Release Tag` workflow from GitHub Actions.
@@ -181,13 +181,15 @@ For APT publishing, add an `APT_REPO_TOKEN` secret with push access to
 - update the APT package index and `Release` metadata in `choihunchul/apt-repo`
 - push the repository update so `apt install lazyifconfig` works after `apt update`
 
-For WinGet publishing, add a `WINGET_TOKEN` secret with a classic GitHub PAT that has the `public_repo` scope.
-Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) under the same account as this repository,
-merge at least one version of `Choihunchul.Lazyifconfig` manually, then the `Publish WinGet Package` workflow will:
+For WinGet publishing, add a `WINGET_TOKEN` secret with a classic PAT that has
+`public_repo` scope and access to your `winget-pkgs` fork. The `Publish WinGet Package` workflow will:
 
-- download the Windows release zip for the selected tag
-- update the WinGet manifest in your `winget-pkgs` fork with Komac
-- open a pull request at `microsoft/winget-pkgs`
+- resolve the selected release tag and version
+- find the Windows release asset that matches `lazyifconfig-.*-x86_64-pc-windows-msvc\.zip`
+- open or update a PR from your `winget-pkgs` fork to `microsoft/winget-pkgs`
+
+If `Choihunchul.Lazyifconfig` does not exist yet in `microsoft/winget-pkgs`, create and merge the first manifest PR manually.
+If it already exists there, you can skip that step and use this workflow for version bumps.
 
 The release workflow builds and uploads artifacts for:
 

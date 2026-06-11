@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 use std::time::Duration;
 
 pub mod dns;
@@ -233,7 +234,13 @@ pub fn tool_input_from_cli_args(id: ToolId, args: &[&str]) -> Result<ToolInput, 
         values.insert(field.key.to_string(), (*value).to_string());
     }
 
-    Ok(ToolInput { values })
+    let input = ToolInput { values };
+    let errors = validate_tool_input(id, &input);
+    if errors.is_empty() {
+        Ok(input)
+    } else {
+        Err(errors.join(" "))
+    }
 }
 
 pub fn format_tool_result_plaintext(result: &ToolResult) -> String {
@@ -278,6 +285,77 @@ pub fn tools_cli_usage() -> String {
     }
 
     lines.join("\n")
+}
+
+pub fn validate_tool_input(id: ToolId, input: &ToolInput) -> Vec<String> {
+    match id {
+        ToolId::DnsLookup
+        | ToolId::WhoisLookup
+        | ToolId::Ping
+        | ToolId::Traceroute => validate_required_fields(input, &["target"]),
+        ToolId::IpInformation => {
+            let mut errors = validate_required_fields(input, &["ip"]);
+            let ip = input.get("ip").unwrap_or("").trim();
+            if !ip.is_empty() && ip.parse::<IpAddr>().is_err() {
+                errors.push("IP must be a valid IPv4 or IPv6 address.".to_string());
+            }
+            errors
+        }
+        ToolId::PortCheck => {
+            let mut errors = validate_required_fields(input, &["host", "port"]);
+            let port = input.get("port").unwrap_or("").trim();
+            if !port.is_empty() && !is_valid_port(port) {
+                errors.push("Port must be a number from 1 to 65535.".to_string());
+            }
+            errors
+        }
+        ToolId::TlsInspector => {
+            let mut errors = validate_required_fields(input, &["target"]);
+            let target = input.get("target").unwrap_or("").trim();
+            if !target.is_empty() && !is_valid_tls_target(target) {
+                errors.push("Target must look like host:port or host.".to_string());
+            }
+            errors
+        }
+    }
+}
+
+fn validate_required_fields(input: &ToolInput, fields: &[&str]) -> Vec<String> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            input.get(field)
+                .map(str::trim)
+                .filter(|value| value.is_empty())
+                .or_else(|| input.get(field).is_none().then_some(""))
+                .map(|_| format!("{} is required.", field_label(field)))
+        })
+        .collect()
+}
+
+fn field_label(field: &str) -> &'static str {
+    match field {
+        "target" => "Target",
+        "ip" => "IP",
+        "host" => "Host",
+        "port" => "Port",
+        _ => "Field",
+    }
+}
+
+fn is_valid_port(port: &str) -> bool {
+    port.parse::<u16>().is_ok_and(|value| value != 0)
+}
+
+fn is_valid_tls_target(target: &str) -> bool {
+    if target.is_empty() {
+        return false;
+    }
+    if let Some((host, port)) = target.rsplit_once(':') {
+        !host.trim().is_empty() && is_valid_port(port.trim())
+    } else {
+        !target.trim().is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

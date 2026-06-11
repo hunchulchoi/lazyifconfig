@@ -7,7 +7,8 @@ use crate::model::{
     RoutePathResult, RouteSortColumn, Subnet,
 };
 use crate::tools::{
-    ToolAvailability, ToolExecutionState, ToolId, ToolInput, ToolRegistry, ToolResult,
+    validate_tool_input, ToolAvailability, ToolExecutionState, ToolId, ToolInput, ToolRegistry,
+    ToolResult,
 };
 use crate::update::{AvailableUpdate, UpdateMessage, UpdateStatus};
 
@@ -239,6 +240,9 @@ impl ToolsState {
     }
 
     pub fn push_input_char(&mut self, c: char) {
+        if matches!(c, '\n' | '\r') {
+            return;
+        }
         if self.selected_definition().fields.is_empty() {
             return;
         }
@@ -252,6 +256,13 @@ impl ToolsState {
             .push(c);
     }
 
+    pub fn push_input_text(&mut self, text: &str) {
+        let first_line = text.lines().next().unwrap_or("").trim_end_matches('\r');
+        for c in first_line.chars() {
+            self.push_input_char(c);
+        }
+    }
+
     pub fn pop_input_char(&mut self) {
         if self.selected_definition().fields.is_empty() {
             return;
@@ -262,6 +273,12 @@ impl ToolsState {
         if let Some(value) = self.input_for_selected_tool().values.get_mut(&field_key) {
             value.pop();
         }
+    }
+
+    pub fn selected_input_validation_errors(&self) -> Vec<String> {
+        let tool_id = self.selected_tool_id();
+        let input = self.inputs.get(&tool_id).cloned().unwrap_or_default();
+        validate_tool_input(tool_id, &input)
     }
 }
 

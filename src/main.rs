@@ -634,6 +634,15 @@ fn start_selected_tool(app: &mut App) {
         return;
     }
 
+    let validation_errors = app.tools.selected_input_validation_errors();
+    if !validation_errors.is_empty() {
+        app.tools.errors.insert(tool_id, validation_errors.join("\n"));
+        app.tools
+            .states
+            .insert(tool_id, lazyifconfig::tools::ToolExecutionState::Failed);
+        return;
+    }
+
     app.tools.expand_dns_raw_output();
 
     let input = app.tools.input_for_selected_tool().clone();
@@ -704,7 +713,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(Duration::from_secs(0));
 
         if event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
+            match event::read()? {
+                Event::Paste(text) => {
+                    if app.view_mode == ViewMode::Tools && app.tools.input_modal_open {
+                        app.tools.push_input_text(&text);
+                    }
+                    continue;
+                }
+                Event::Key(key) => {
                 // --- Raw viewer mode: intercept all input ---
                 if app.raw_viewer.active {
                     if app.raw_viewer.search_active {
@@ -1434,8 +1450,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         app.help_visible = false;
                         app.scroll_details_down();
                     }
-                    _ => {}
+                        _ => {}
+                    }
                 }
+                _ => {}
             }
         }
 
