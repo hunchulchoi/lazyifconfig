@@ -16,6 +16,7 @@ pub struct ReleaseInfo {
     pub html_url: String,
     pub body: String,
     pub assets: Vec<ReleaseAsset>,
+    pub release_date: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,11 +27,15 @@ pub struct AvailableUpdate {
     pub asset_name: String,
     pub download_url: String,
     pub release_notes: String,
+    pub release_date: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckOutcome {
-    UpToDate { current_version: String },
+    UpToDate {
+        current_version: String,
+        release_date: Option<String>,
+    },
     Available(AvailableUpdate),
 }
 
@@ -82,6 +87,7 @@ struct GitHubReleaseResponse {
     html_url: String,
     body: Option<String>,
     assets: Vec<GitHubReleaseAsset>,
+    published_at: Option<String>,
 }
 
 pub fn release_api_url() -> Result<String, String> {
@@ -111,9 +117,13 @@ pub fn evaluate_release_json(json: &str) -> Result<CheckOutcome, String> {
                 asset_name: asset.name.clone(),
                 download_url: asset.download_url.clone(),
                 release_notes: normalize_release_notes(&release.body),
+                release_date: release.release_date.unwrap_or_default(),
             }))
         }
-        _ => Ok(CheckOutcome::UpToDate { current_version }),
+        _ => Ok(CheckOutcome::UpToDate {
+            current_version,
+            release_date: release.release_date,
+        }),
     }
 }
 
@@ -203,6 +213,7 @@ fn parse_release_json(json: &str) -> Result<ReleaseInfo, String> {
         tag_name: release.tag_name,
         html_url: release.html_url,
         body: release.body.unwrap_or_default(),
+        release_date: release.published_at,
         assets: release
             .assets
             .into_iter()
@@ -354,6 +365,7 @@ mod tests {
                 \"tag_name\":\"v9.9.9\",\
                 \"html_url\":\"https://github.com/hunchulchoi/lazyifconfig/releases/tag/v9.9.9\",\
                 \"body\":\"## Highlights\\n- Faster scans\\n- Better update UI\",\
+                \"published_at\":\"2026-01-01T12:34:56Z\",\
                 \"assets\":[{{\
                     \"name\":\"lazyifconfig-v9.9.9-{target}.tar.gz\",\
                     \"browser_download_url\":\"https://example.com/lazyifconfig-v9.9.9-{target}.tar.gz\"\
@@ -373,6 +385,7 @@ mod tests {
         );
         assert!(update.release_notes.contains("Highlights"));
         assert!(update.release_notes.contains("Faster scans"));
+        assert_eq!(update.release_date, "2026-01-01T12:34:56Z");
     }
 
     #[test]
@@ -384,6 +397,7 @@ mod tests {
                 \"tag_name\":\"v{current}\",\
                 \"html_url\":\"https://github.com/hunchulchoi/lazyifconfig/releases/tag/v{current}\",\
                 \"body\":\"\",\
+                \"published_at\":\"2026-01-01T12:34:56Z\",\
                 \"assets\":[{{\
                     \"name\":\"lazyifconfig-v{current}-{target}.tar.gz\",\
                     \"browser_download_url\":\"https://example.com/lazyifconfig-v{current}-{target}.tar.gz\"\
@@ -395,7 +409,8 @@ mod tests {
         assert_eq!(
             result,
             CheckOutcome::UpToDate {
-                current_version: current.to_string()
+                current_version: current.to_string(),
+                release_date: Some("2026-01-01T12:34:56Z".to_string())
             }
         );
     }

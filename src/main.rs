@@ -549,8 +549,12 @@ fn drain_update_messages(app: &mut App) {
     for message in messages {
         match message {
             UpdateMessage::CheckFinished { manual, result } => match result {
-                Ok(CheckOutcome::UpToDate { .. }) => {
+                Ok(CheckOutcome::UpToDate {
+                    current_version: _,
+                    release_date,
+                }) => {
                     app.pending_update = None;
+                    app.latest_release_date = release_date;
                     app.update_status = UpdateStatus::UpToDate;
                     if manual {
                         app.push_event(NetworkEvent::new(
@@ -562,6 +566,7 @@ fn drain_update_messages(app: &mut App) {
                 }
                 Ok(CheckOutcome::Available(update)) => {
                     let version = update.target_version.clone();
+                    app.latest_release_date = Some(update.release_date.clone());
                     app.pending_update = Some(update);
                     app.update_status = UpdateStatus::Available {
                         version: version.clone(),
@@ -1112,17 +1117,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Tab => {
                         if app.view_mode == ViewMode::Routes {
                             app.select_next_route_section();
+                        } else if app.view_mode == ViewMode::Ports {
+                            app.select_next_port_details_section();
+                        } else if app.view_mode == ViewMode::Connections {
+                            app.select_next_connection_details_section();
                         }
                     }
                     KeyCode::BackTab => {
                         if app.view_mode == ViewMode::Routes {
                             app.select_previous_route_section();
+                        } else if app.view_mode == ViewMode::Ports {
+                            app.select_previous_port_details_section();
+                        } else if app.view_mode == ViewMode::Connections {
+                            app.select_previous_connection_details_section();
+                        }
+                    }
+                    KeyCode::Home => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_route_section_by_index(0);
+                        }
+                    }
+                    KeyCode::End => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_route_section_by_index(3);
                         }
                     }
                     KeyCode::Enter => {
                         if app.view_mode == ViewMode::Routes {
                             app.route_inspector.destination_input_active = true;
                             app.route_inspector.active_section = RouteInspectorSection::PathViewer;
+                        }
+                    }
+                    KeyCode::Char('1') => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_route_section_by_index(0);
+                        }
+                    }
+                    KeyCode::Char('2') => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_route_section_by_index(1);
+                        }
+                    }
+                    KeyCode::Char('3') => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_route_section_by_index(2);
+                        }
+                    }
+                    KeyCode::Char('4') => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_route_section_by_index(3);
+                        }
+                    }
+                    KeyCode::Char('5') => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_route_section_by_index(3);
                         }
                     }
                     KeyCode::Char('K') => {

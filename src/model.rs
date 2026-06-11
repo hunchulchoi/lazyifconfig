@@ -188,7 +188,6 @@ pub enum RouteInspectorSection {
     #[default]
     Summary,
     PathViewer,
-    RouteTable,
     VpnRoutes,
     Diagnostics,
 }

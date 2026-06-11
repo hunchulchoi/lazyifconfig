@@ -1,7 +1,8 @@
 use std::{fs, process::Command, sync::OnceLock};
 
 use crate::app::{
-    App, ConnectionSortColumn, NavigationItem, PortSortColumn, SortDirection, ViewMode,
+    App, ConnectionDetailsSection, ConnectionSortColumn, NavigationItem, PortDetailsSection,
+    PortSortColumn, SortDirection, ViewMode,
 };
 use crate::model::{
     InterfaceStatus, NetworkKind, ProcessMetrics, RouteDiagnosticSeverity, RouteFamily,
@@ -26,6 +27,12 @@ pub fn render_title() -> &'static str {
 }
 
 fn header_line(app: &App) -> Line<'static> {
+    let release_label = format!(
+        " v{} ({})",
+        env!("CARGO_PKG_VERSION"),
+        release_date_label(app.latest_release_date.as_deref())
+    );
+
     let mut spans = vec![
         Span::styled(
             "🦥 Lazyifconfig",
@@ -33,6 +40,7 @@ fn header_line(app: &App) -> Line<'static> {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::styled(release_label, Style::default().fg(Color::Yellow)),
         Span::styled(" - ", Style::default().fg(Color::DarkGray)),
         Span::styled(os_display_label(), Style::default().fg(Color::White)),
     ];
@@ -45,6 +53,14 @@ fn header_line(app: &App) -> Line<'static> {
     }
 
     Line::from(spans)
+}
+
+fn release_date_label(release_date: Option<&str>) -> String {
+    release_date
+        .and_then(|value| value.split('T').next())
+        .filter(|value| !value.is_empty())
+        .map(std::string::ToString::to_string)
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn format_process_metrics(metrics: &ProcessMetrics) -> Option<String> {
@@ -172,7 +188,7 @@ fn get_status_text(app: &App) -> String {
                 " filter: type | Enter apply | Esc clear | Backspace delete ".to_string()
             } else {
                 format!(
-                    " q | / filter | s sort | S dir | c copy | w whois | sort:{} | [/] ",
+                    " q | / filter | s sort | S dir | Tab section | c copy | w whois | sort:{} | [/] ",
                     connection_sort_label(app)
                 )
             }
@@ -182,7 +198,7 @@ fn get_status_text(app: &App) -> String {
                 " filter: type | Enter apply | Esc clear | Backspace delete ".to_string()
             } else {
                 format!(
-                    " q | r | / filter | s sort | S dir | K kill | sort:{} | [/] | i/n/c/e/g ",
+                    " q | r | / filter | s sort | S dir | Tab section | K kill | sort:{} | [/] | i/n/c/e/g ",
                     port_sort_label(app)
                 )
             }
@@ -197,7 +213,7 @@ fn get_status_text(app: &App) -> String {
                 " destination: type | Enter lookup | Esc cancel | Backspace delete ".to_string()
             } else {
                 format!(
-                    " q | u check | U update | R notes | Enter path | Tab section | / filter | s sort | S dir | o raw | sort:{} | i/n/c/p/e ",
+                    " q | u check | U update | R notes | Enter path | Tab section | Home/End/1-4/5 | / filter | s sort | S dir | o raw | sort:{} | i/n/c/p/e ",
                     route_sort_label(app)
                 )
             }
@@ -304,8 +320,10 @@ fn view_tabs(view_mode: ViewMode) -> Line<'static> {
 pub fn draw(frame: &mut Frame, app: &App) {
     let filter_bar_height: u16 = if app.port_filter_active
         || app.connection_filter_active
+        || app.route_inspector.route_filter_active
         || (app.view_mode == ViewMode::Ports && !app.port_filter.is_empty())
         || (app.view_mode == ViewMode::Connections && !app.connection_filter.is_empty())
+        || (app.view_mode == ViewMode::Routes && !app.route_inspector.route_filter.is_empty())
     {
         1
     } else {
@@ -806,89 +824,39 @@ pub fn draw(frame: &mut Frame, app: &App) {
                     state,
                     index: _,
                 } => {
-                    let mut details_text = String::new();
-                    details_text.push_str("=== Active Connection Details ===\n\n");
-                    details_text
-                        .push_str(&format!("Protocol:             {}\n", proto.to_uppercase()));
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(1), Constraint::Min(0)])
+                        .split(details_inner);
 
-                    details_text.push_str(&format!("Local IP Address:     {}\n", local_ip));
-                    details_text.push_str(&format!("Local Port:           {}\n", local_port));
+                    let tab_line = Paragraph::new(connection_details_section_tabs(app)).style(
+                        Style::default()
+                            .fg(Color::White)
+                            .bg(Color::Rgb(24, 24, 24)),
+                    );
+                    frame.render_widget(tab_line, chunks[0]);
 
-                    details_text.push_str(&format!("Foreign IP Address:   {}\n", foreign_ip));
-                    details_text.push_str(&format!("Foreign Port:         {}\n", foreign_port));
-
-                    if let Some(s) = state {
-                        details_text.push_str(&format!("TCP State:            {}\n", s));
-                    }
-
-                    // Map local IP to local interfaces
-                    let mut mapped_interface = "N/A (External/Wildcard)".to_string();
-                    if let Some(snapshot) = &app.current_snapshot {
-                        for interface in &snapshot.interfaces {
-                            let matches_ipv4 =
-                                interface.ipv4.iter().any(|addr| addr.value == *local_ip);
-                            let matches_ipv6 =
-                                interface.ipv6.iter().any(|addr| addr.value == *local_ip);
-                            if matches_ipv4 || matches_ipv6 {
-                                mapped_interface = format!(
-                                    "{} ({})",
-                                    interface.name,
-                                    interface.network_kind.as_str()
-                                );
-                                break;
-                            }
+                    let lines = match app.connection_details_section {
+                        ConnectionDetailsSection::Summary => {
+                            connection_summary_lines(
+                                proto,
+                                local_ip,
+                                local_port,
+                                foreign_ip,
+                                foreign_port,
+                                state.as_deref(),
+                                resolve_connection_interface(app, local_ip),
+                            )
                         }
-                    }
-                    if local_ip == "127.0.0.1" || local_ip == "::1" || local_ip == "fe80::1%lo0" {
-                        mapped_interface = "lo0 (LOOPBACK)".to_string();
-                    } else if local_ip == "*" || local_ip == "::" || local_ip == "0.0.0.0" {
-                        mapped_interface = "All Interfaces (Wildcard)".to_string();
-                    }
-
-                    details_text.push_str(&format!("Associated Interface: {}\n", mapped_interface));
-
-                    if foreign_ip != "*"
-                        && foreign_ip != "::"
-                        && foreign_ip != "0.0.0.0"
-                        && foreign_ip != "*.*"
-                    {
-                        details_text.push_str("\n[c: Copy IP | w: WHOIS Query]\n");
-                        if let Some(whois) = app.get_whois_result(foreign_ip) {
-                            details_text.push_str("\n=== Whois Information ===\n");
-                            details_text.push_str(&whois);
-                        } else {
-                            details_text.push_str("\nPress 'w' to fetch WHOIS information.\n");
+                        ConnectionDetailsSection::Whois => {
+                            connection_whois_lines(app, foreign_ip)
                         }
-                    }
+                    };
 
-                    let mut ui_lines = Vec::new();
-                    let mut in_whois_section = false;
-                    for line in details_text.lines() {
-                        if line.contains("=== Whois Information ===") {
-                            in_whois_section = true;
-                        }
-
-                        let is_highlight = in_whois_section && {
-                            let lower = line.to_lowercase();
-                            lower.contains("origin") || lower.contains("org")
-                        };
-
-                        if is_highlight {
-                            ui_lines.push(Line::from(Span::styled(
-                                line.to_string(),
-                                Style::default()
-                                    .fg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD),
-                            )));
-                        } else {
-                            ui_lines.push(Line::from(line.to_string()));
-                        }
-                    }
-
-                    let details_p = Paragraph::new(ui_lines)
+                    let details_p = Paragraph::new(lines)
                         .wrap(Wrap { trim: true })
                         .scroll((app.details_scroll, 0));
-                    frame.render_widget(details_p, details_inner);
+                    frame.render_widget(details_p, chunks[1]);
                 }
                 NavigationItem::ListeningPort {
                     proto,
@@ -898,67 +866,31 @@ pub fn draw(frame: &mut Frame, app: &App) {
                     user,
                     ..
                 } => {
-                    let mut lines = Vec::new();
-                    lines.push(Line::from(Span::styled(
-                        "=== Listening Port Details ===",
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(1), Constraint::Min(0)])
+                        .split(details_inner);
+
+                    let tab_line = Paragraph::new(port_details_section_tabs(app)).style(
                         Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )));
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            "Protocol:   ",
-                            Style::default().add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw(proto.to_uppercase()),
-                    ]));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            "Port:       ",
-                            Style::default().add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            port.as_str(),
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        "=== Process Information ===",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )));
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            "Command:    ",
-                            Style::default().add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(command.as_str(), Style::default().fg(Color::Green)),
-                    ]));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            "PID:        ",
-                            Style::default().add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw(pid.as_str()),
-                    ]));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            "User:       ",
-                            Style::default().add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw(user.as_str()),
-                    ]));
+                            .fg(Color::White)
+                            .bg(Color::Rgb(24, 24, 24)),
+                    );
+                    frame.render_widget(tab_line, chunks[0]);
+
+                    let lines = match app.port_details_section {
+                        PortDetailsSection::Summary => {
+                            port_summary_lines(proto, port, pid, user)
+                        }
+                        PortDetailsSection::Process => {
+                            port_process_lines(command, pid, user)
+                        }
+                    };
 
                     let details_p = Paragraph::new(lines)
                         .wrap(Wrap { trim: true })
                         .scroll((app.details_scroll, 0));
-                    frame.render_widget(details_p, details_inner);
+                    frame.render_widget(details_p, chunks[1]);
                 }
                 NavigationItem::Event {
                     index,
@@ -1110,6 +1042,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if filter_bar_height > 0 {
         let (filter_value, filter_active) = if app.view_mode == ViewMode::Connections {
             (app.connection_filter.as_str(), app.connection_filter_active)
+        } else if app.view_mode == ViewMode::Routes {
+            (app.route_inspector.route_filter.as_str(), app.route_inspector.route_filter_active)
         } else {
             (app.port_filter.as_str(), app.port_filter_active)
         };
@@ -1435,7 +1369,7 @@ fn render_ports_table(frame: &mut Frame, app: &App, block: Block<'_>, area: Rect
             .add_modifier(Modifier::BOLD),
     );
 
-    let rows = app
+    let rows: Vec<Row> = app
         .navigation_items
         .iter()
         .enumerate()
@@ -1454,7 +1388,8 @@ fn render_ports_table(frame: &mut Frame, app: &App, block: Block<'_>, area: Rect
 
             let style = if idx == app.selected_index {
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -1470,7 +1405,14 @@ fn render_ports_table(frame: &mut Frame, app: &App, block: Block<'_>, area: Rect
                 ])
                 .style(style),
             )
-        });
+        })
+        .collect();
+
+    let rows = visible_rows(
+        rows,
+        app.selected_index,
+        visible_table_rows(area.height),
+    );
 
     let table = Table::new(
         rows,
@@ -1520,7 +1462,7 @@ fn render_connections_table(frame: &mut Frame, app: &App, block: Block<'_>, area
             .add_modifier(Modifier::BOLD),
     );
 
-    let rows = app
+    let rows: Vec<Row> = app
         .navigation_items
         .iter()
         .enumerate()
@@ -1540,7 +1482,8 @@ fn render_connections_table(frame: &mut Frame, app: &App, block: Block<'_>, area
 
             let style = if idx == app.selected_index {
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -1560,7 +1503,14 @@ fn render_connections_table(frame: &mut Frame, app: &App, block: Block<'_>, area
                 ])
                 .style(style),
             )
-        });
+        })
+        .collect();
+
+    let rows = visible_rows(
+        rows,
+        app.selected_index,
+        visible_table_rows(area.height),
+    );
 
     let table = Table::new(
         rows,
@@ -1602,6 +1552,32 @@ fn connection_header_label(app: &App, column: ConnectionSortColumn, label: &str)
         SortDirection::Descending => "↓",
     };
     format!("{label} {arrow}")
+}
+
+fn visible_table_rows(area_height: u16) -> usize {
+    area_height
+        .saturating_sub(3)
+        .max(1)
+        .try_into()
+        .unwrap_or(usize::MAX)
+}
+
+fn visible_rows<T>(mut rows: Vec<T>, selected_index: usize, max_visible: usize) -> Vec<T> {
+    if rows.is_empty() || max_visible == 0 {
+        return Vec::new();
+    }
+
+    let max_visible = max_visible.min(rows.len());
+    let selected_index = selected_index.min(rows.len() - 1);
+    let mut start = selected_index.saturating_sub(max_visible.saturating_sub(1));
+    let last_possible_start = rows.len() - max_visible;
+    if start > last_possible_start {
+        start = last_possible_start;
+    }
+
+    rows.drain(0..start);
+    rows.truncate(max_visible);
+    rows
 }
 
 fn format_endpoint(ip: &str, port: &str) -> String {
@@ -2327,25 +2303,272 @@ fn diagnostic_color(severity: RouteDiagnosticSeverity) -> Color {
 }
 
 fn render_route_inspector_details(frame: &mut Frame, app: &App, area: Rect) {
-    match app.route_inspector.active_section {
-        RouteInspectorSection::RouteTable => {
-            render_route_table(frame, app, Block::default(), area);
-        }
-        _ => {
-            let lines = match app.route_inspector.active_section {
-                RouteInspectorSection::Summary => route_summary_lines(app),
-                RouteInspectorSection::PathViewer => route_path_lines(app),
-                RouteInspectorSection::VpnRoutes => vpn_route_lines(app),
-                RouteInspectorSection::Diagnostics => route_diagnostic_lines(app),
-                RouteInspectorSection::RouteTable => unreachable!(),
-            };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
 
-            let paragraph = Paragraph::new(lines)
-                .wrap(Wrap { trim: true })
-                .scroll((app.details_scroll, 0));
-            frame.render_widget(paragraph, area);
+    let tab_line = Paragraph::new(route_inspector_section_tabs(app)).style(
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Rgb(24, 24, 24)),
+    );
+    frame.render_widget(tab_line, chunks[0]);
+
+    let lines = match app.route_inspector.active_section {
+        RouteInspectorSection::Summary => route_summary_lines(app),
+        RouteInspectorSection::PathViewer => route_path_lines(app),
+        RouteInspectorSection::VpnRoutes => vpn_route_lines(app),
+        RouteInspectorSection::Diagnostics => route_diagnostic_lines(app),
+    };
+
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .scroll((app.details_scroll, 0));
+    frame.render_widget(paragraph, chunks[1]);
+}
+
+fn detail_section_tabs(
+    labels: &'static [(&'static str, usize)],
+    active_index: usize,
+) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (idx, (label, key_hint)) in labels.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+        }
+
+        let style = if idx == active_index {
+            Style::default()
+                .bg(Color::Yellow)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let label = format!(" {}:{} ", key_hint, label);
+        spans.push(Span::styled(label, style));
+    }
+
+    Line::from(spans)
+}
+
+fn route_inspector_section_tabs(app: &App) -> Line<'static> {
+    let active_index = match app.route_inspector.active_section {
+        RouteInspectorSection::Summary => 0,
+        RouteInspectorSection::PathViewer => 1,
+        RouteInspectorSection::VpnRoutes => 2,
+        RouteInspectorSection::Diagnostics => 3,
+    };
+
+    detail_section_tabs(
+        &[
+            ("Summary", 1),
+            ("Path", 2),
+            ("VPN", 3),
+            ("Diagnostics", 4),
+        ],
+        active_index,
+    )
+}
+
+fn port_details_section_tabs(app: &App) -> Line<'static> {
+    let active_index = match app.port_details_section {
+        PortDetailsSection::Summary => 0,
+        PortDetailsSection::Process => 1,
+    };
+
+    detail_section_tabs(&[("Summary", 1), ("Process", 2)], active_index)
+}
+
+fn connection_details_section_tabs(app: &App) -> Line<'static> {
+    let active_index = match app.connection_details_section {
+        ConnectionDetailsSection::Summary => 0,
+        ConnectionDetailsSection::Whois => 1,
+    };
+
+    detail_section_tabs(&[("Summary", 1), ("Whois", 2)], active_index)
+}
+
+fn is_remote_connection_target(ip: &str) -> bool {
+    ip != "*" && ip != "::" && ip != "0.0.0.0" && ip != "*.*"
+}
+
+fn resolve_connection_interface(app: &App, local_ip: &str) -> String {
+    let mut mapped_interface = "N/A (External/Wildcard)".to_string();
+    if let Some(snapshot) = &app.current_snapshot {
+        for interface in &snapshot.interfaces {
+            let matches_ipv4 = interface.ipv4.iter().any(|addr| addr.value == local_ip);
+            let matches_ipv6 = interface.ipv6.iter().any(|addr| addr.value == local_ip);
+            if matches_ipv4 || matches_ipv6 {
+                mapped_interface = format!("{} ({})", interface.name, interface.network_kind.as_str());
+                break;
+            }
         }
     }
+
+    if local_ip == "127.0.0.1" || local_ip == "::1" || local_ip == "fe80::1%lo0" {
+        "lo0 (LOOPBACK)".to_string()
+    } else if local_ip == "*" || local_ip == "::" || local_ip == "0.0.0.0" {
+        "All Interfaces (Wildcard)".to_string()
+    } else {
+        mapped_interface
+    }
+}
+
+fn connection_summary_lines(
+    proto: &str,
+    local_ip: &str,
+    local_port: &str,
+    foreign_ip: &str,
+    foreign_port: &str,
+    state: Option<&str>,
+    mapped_interface: String,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "=== Connection Summary ===",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Protocol:          ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(proto.to_uppercase().to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Local IP:          ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(local_ip.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Local Port:        ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(local_port.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Foreign IP:        ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(foreign_ip.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Foreign Port:      ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(foreign_port.to_string()),
+        ]),
+    ];
+
+    if let Some(state) = state {
+        lines.push(Line::from(vec![
+            Span::styled("TCP State:         ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(state.to_string()),
+        ]));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled("Associated Interface:", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(format!(" {}", mapped_interface)),
+    ]));
+
+    if is_remote_connection_target(foreign_ip) {
+        lines.push(Line::from("Press c: Copy IP | w: WHOIS Query"));
+    }
+
+    lines
+}
+
+fn connection_whois_lines(app: &App, foreign_ip: &str) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "=== Whois ===",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    if !is_remote_connection_target(foreign_ip) {
+        lines.push(Line::from("No remote peer to query."));
+        return lines;
+    }
+
+    lines.push(Line::from(format!("Target: {}", foreign_ip)));
+    match app.get_whois_result(foreign_ip).as_deref() {
+        Some(whois_result) => {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Result:",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            )));
+            for line in whois_result.lines() {
+                lines.push(Line::from(line.to_string()));
+            }
+        }
+        None => {
+            lines.push(Line::from("No WHOIS data loaded."));
+            lines.push(Line::from("Press w to fetch WHOIS."));
+        }
+    }
+
+    lines
+}
+
+fn port_summary_lines(
+    proto: &str,
+    port: &str,
+    pid: &str,
+    user: &str,
+) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "=== Port Summary ===",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Protocol: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(proto.to_uppercase().to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Port:     ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(port.to_string(), Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(vec![
+            Span::styled("PID:      ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(pid.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("User:     ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(user.to_string()),
+        ]),
+        Line::from(""),
+        Line::from("Press Tab for process details."),
+    ]
+}
+
+fn port_process_lines(command: &str, pid: &str, user: &str) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "=== Process ===",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Command: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(command.to_string(), Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("PID:     ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(pid.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("User:    ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(user.to_string()),
+        ]),
+    ]
 }
 
 fn route_summary_lines(app: &App) -> Vec<Line<'static>> {
@@ -2500,140 +2723,6 @@ fn route_path_lines(app: &App) -> Vec<Line<'static>> {
     lines
 }
 
-fn route_table_detail_lines(app: &App) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "=== Route Table ===",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Destination         Gateway          Interface  Metric  Proto   Flags   Family",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-    ];
-
-    let Some(snapshot) = &app.current_snapshot else {
-        lines.push(Line::from("No route snapshot available."));
-        return lines;
-    };
-
-    if snapshot.routes.is_empty() {
-        lines.push(Line::from("No routes detected."));
-        return lines;
-    }
-
-    for (_, route) in app.filtered_sorted_routes() {
-        let text = format!(
-            "{:<18} {:<16} {:<10} {:<7} {:<7} {:<7} {}",
-            route.destination,
-            route.gateway,
-            route.interface,
-            route
-                .metric
-                .map(|metric| metric.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-            route.protocol.as_deref().unwrap_or("-"),
-            route.flags.as_deref().unwrap_or("-"),
-            route_family_label(route.family),
-        );
-        let style = if is_default_route(route) {
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD)
-        } else if is_vpn_interface_name(&route.interface) {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        };
-        lines.push(Line::from(Span::styled(text, style)));
-    }
-
-    lines
-}
-
-fn render_route_table(frame: &mut Frame, app: &App, block: Block<'_>, area: Rect) {
-    let header = Row::new([
-        Cell::from(route_header_label(
-            app,
-            RouteSortColumn::Destination,
-            "Destination",
-        )),
-        Cell::from(route_header_label(app, RouteSortColumn::Gateway, "Gateway")),
-        Cell::from(route_header_label(
-            app,
-            RouteSortColumn::Interface,
-            "Interface",
-        )),
-        Cell::from(route_header_label(app, RouteSortColumn::Metric, "Metric")),
-        Cell::from("Protocol"),
-        Cell::from("Flags"),
-        Cell::from("Family"),
-    ])
-    .style(
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    );
-
-    let rows = app.filtered_sorted_routes().into_iter().map(|(_, route)| {
-        let metric = route
-            .metric
-            .map(|metric| metric.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let style = if is_default_route(route) {
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD)
-        } else if is_vpn_interface_name(&route.interface) {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        };
-
-        Row::new([
-            highlighted_filter_cell(route.destination.clone(), &app.route_inspector.route_filter),
-            highlighted_filter_cell(route.gateway.clone(), &app.route_inspector.route_filter),
-            highlighted_filter_cell(route.interface.clone(), &app.route_inspector.route_filter),
-            Cell::from(metric.clone()),
-            Cell::from(route.protocol.as_deref().unwrap_or("-")),
-            Cell::from(route.flags.as_deref().unwrap_or("-")),
-            Cell::from(route_family_label(route.family)),
-        ])
-        .style(style)
-    });
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(18),
-            Constraint::Length(16),
-            Constraint::Length(12),
-            Constraint::Length(8),
-            Constraint::Length(8),
-            Constraint::Length(7),
-            Constraint::Length(7),
-        ],
-    )
-    .header(header)
-    .column_spacing(1)
-    .block(block);
-    frame.render_widget(table, area);
-}
-
-fn route_header_label(app: &App, column: RouteSortColumn, label: &str) -> String {
-    if app.route_inspector.sort_column != column {
-        return label.to_string();
-    }
-
-    let arrow = match app.route_inspector.route_sort_direction {
-        SortDirection::Ascending => "↑",
-        SortDirection::Descending => "↓",
-    };
-    format!("{label} {arrow}")
-}
 
 fn vpn_route_lines(app: &App) -> Vec<Line<'static>> {
     let mut lines = vec![
@@ -2864,6 +2953,28 @@ mod tests {
     }
 
     #[test]
+    fn test_route_detail_tabs_show_all_sections() {
+        let mut app = route_test_app(RouteInspectorSection::Summary);
+
+        let tabs = route_inspector_section_tabs(&app);
+        let mut text = String::new();
+        for span in &tabs.spans {
+            text.push_str(span.content.as_ref());
+        }
+
+        assert!(text.contains("Summary"));
+        assert!(text.contains("Path"));
+        assert!(text.contains("VPN"));
+        assert!(text.contains("Diagnostics"));
+
+        let summary_tab = tabs
+            .spans
+            .iter()
+            .find(|span| span.content == " Summary ");
+        assert!(summary_tab.is_some());
+    }
+
+    #[test]
     fn test_ui_draw_routes_path_viewer_with_result() {
         let mut app = route_test_app(RouteInspectorSection::PathViewer);
         app.route_inspector.latest_path_result = Some(RoutePathResult {
@@ -2921,45 +3032,6 @@ mod tests {
         assert!(rendered.contains("Route Summary"));
         assert!(rendered.contains("No default route"));
         assert!(!rendered.contains("No data collected yet"));
-    }
-
-    #[test]
-    fn test_route_table_detail_uses_active_filter() {
-        let mut app = route_test_app(RouteInspectorSection::RouteTable);
-        app.route_inspector.route_filter = "utun4".to_string();
-        app.update_navigation_items();
-
-        let rendered = route_table_detail_lines(&app)
-            .into_iter()
-            .flat_map(|line| {
-                line.spans
-                    .into_iter()
-                    .map(|span| span.content.into_owned())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<String>();
-
-        assert!(rendered.contains("10.8.0.0/24"));
-        assert!(!rendered.contains("192.168.0.1"));
-    }
-
-    #[test]
-    fn test_route_table_shows_sorted_headers() {
-        let app = route_test_app(RouteInspectorSection::RouteTable);
-        let backend = TestBackend::new(140, 32);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &app)).unwrap();
-
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(rendered.contains("Destination ↑"));
-        assert!(rendered.contains("Gateway"));
     }
 
     #[test]
@@ -3287,6 +3359,68 @@ mod tests {
     }
 
     #[test]
+    fn test_routes_view_shows_route_rows() {
+        let app = route_test_app(RouteInspectorSection::Summary);
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let mut left_pane = String::new();
+        for y in 0..24 {
+            for x in 0..48 {
+                left_pane.push_str(buffer.get(x, y).symbol());
+            }
+        }
+
+        assert!(left_pane.contains("default"));
+        assert!(left_pane.contains("192.168.0.1"));
+        assert!(left_pane.contains("utun4"));
+    }
+
+    #[test]
+    fn test_routes_filter_applies_to_route_list() {
+        let mut app = route_test_app(RouteInspectorSection::Summary);
+        app.route_inspector.route_filter = "utun4".to_string();
+        app.update_navigation_items();
+
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let mut left_pane = String::new();
+        for y in 0..24 {
+            for x in 0..48 {
+                left_pane.push_str(buffer.get(x, y).symbol());
+            }
+        }
+
+        assert!(left_pane.contains("utun4"));
+        assert!(!left_pane.contains("192.168.0.1"));
+    }
+
+    #[test]
+    fn test_routes_view_highlights_selected_route_row() {
+        let mut app = route_test_app(RouteInspectorSection::Summary);
+        app.selected_index = 1;
+
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let has_selected = (2..20).any(|y| {
+            (0..48).any(|x| {
+                let cell = buffer.get(x, y);
+                cell.bg == Color::Yellow && cell.fg == Color::Black
+            })
+        });
+
+        assert!(has_selected);
+    }
+
+    #[test]
     fn draw_tools_view_lists_runnable_and_planned_tools() {
         let mut app = App::default();
         app.set_view_mode(ViewMode::Tools);
@@ -3350,6 +3484,7 @@ mod tests {
             release_url: "https://example.com/release".to_string(),
             asset_name: "lazyifconfig-v9.9.9-aarch64-apple-darwin.tar.gz".to_string(),
             download_url: "https://example.com/release.tar.gz".to_string(),
+            release_date: "2026-01-01T12:34:56Z".to_string(),
             release_notes: "Big networking refresh\nFaster route parsing\nExtra diagnostics"
                 .to_string(),
         });
@@ -3441,6 +3576,7 @@ mod tests {
             release_url: "https://example.com/release".to_string(),
             asset_name: "lazyifconfig-v9.9.9-aarch64-apple-darwin.tar.gz".to_string(),
             download_url: "https://example.com/release.tar.gz".to_string(),
+            release_date: "2026-01-01T12:34:56Z".to_string(),
             release_notes: "## Highlights\n- Faster scans\n- Better update UI\n- Route fixes"
                 .to_string(),
         });

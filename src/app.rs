@@ -12,6 +12,18 @@ use crate::tools::{
 use crate::update::{AvailableUpdate, UpdateMessage, UpdateStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortDetailsSection {
+    Summary,
+    Process,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectionDetailsSection {
+    Summary,
+    Whois,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMode {
     Interface,
     Network,
@@ -285,12 +297,15 @@ pub struct App {
     pub last_update_check: Option<std::time::Instant>,
     pub update_messages: std::sync::Arc<std::sync::Mutex<Vec<UpdateMessage>>>,
     pub attempted_update_version: Option<String>,
+    pub latest_release_date: Option<String>,
     pub release_notes_viewer: ReleaseNotesViewerState,
     pub process_metrics: Option<ProcessMetrics>,
     pub tools: ToolsState,
     pub pending_tool_results:
         std::sync::Arc<std::sync::Mutex<Vec<(ToolId, Result<ToolResult, String>)>>>,
     pub route_inspector: RouteInspectorState,
+    pub port_details_section: PortDetailsSection,
+    pub connection_details_section: ConnectionDetailsSection,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -382,11 +397,14 @@ impl Default for App {
             last_update_check: None,
             update_messages: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             attempted_update_version: None,
+            latest_release_date: None,
             release_notes_viewer: ReleaseNotesViewerState::default(),
             process_metrics: None,
             tools: ToolsState::default(),
             pending_tool_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             route_inspector: RouteInspectorState::default(),
+            port_details_section: PortDetailsSection::Summary,
+            connection_details_section: ConnectionDetailsSection::Summary,
         }
     }
 }
@@ -496,6 +514,12 @@ impl App {
         self.connection_filter_active = false;
         self.route_inspector.route_filter.clear();
         self.route_inspector.route_filter_active = false;
+        match self.view_mode {
+            ViewMode::Routes => self.route_inspector.active_section = RouteInspectorSection::Summary,
+            ViewMode::Ports => self.port_details_section = PortDetailsSection::Summary,
+            ViewMode::Connections => self.connection_details_section = ConnectionDetailsSection::Summary,
+            _ => {}
+        }
         self.update_navigation_items();
         self.restore_selection(selected_name.as_deref());
     }
@@ -767,8 +791,7 @@ impl App {
     pub fn select_next_route_section(&mut self) {
         self.route_inspector.active_section = match self.route_inspector.active_section {
             RouteInspectorSection::Summary => RouteInspectorSection::PathViewer,
-            RouteInspectorSection::PathViewer => RouteInspectorSection::RouteTable,
-            RouteInspectorSection::RouteTable => RouteInspectorSection::VpnRoutes,
+            RouteInspectorSection::PathViewer => RouteInspectorSection::VpnRoutes,
             RouteInspectorSection::VpnRoutes => RouteInspectorSection::Diagnostics,
             RouteInspectorSection::Diagnostics => RouteInspectorSection::Summary,
         };
@@ -779,9 +802,68 @@ impl App {
         self.route_inspector.active_section = match self.route_inspector.active_section {
             RouteInspectorSection::Summary => RouteInspectorSection::Diagnostics,
             RouteInspectorSection::PathViewer => RouteInspectorSection::Summary,
-            RouteInspectorSection::RouteTable => RouteInspectorSection::PathViewer,
-            RouteInspectorSection::VpnRoutes => RouteInspectorSection::RouteTable,
+            RouteInspectorSection::VpnRoutes => RouteInspectorSection::PathViewer,
             RouteInspectorSection::Diagnostics => RouteInspectorSection::VpnRoutes,
+        };
+        self.details_scroll = 0;
+    }
+
+    pub fn select_next_port_details_section(&mut self) {
+        self.port_details_section = match self.port_details_section {
+            PortDetailsSection::Summary => PortDetailsSection::Process,
+            PortDetailsSection::Process => PortDetailsSection::Summary,
+        };
+        self.details_scroll = 0;
+    }
+
+    pub fn select_previous_port_details_section(&mut self) {
+        self.port_details_section = match self.port_details_section {
+            PortDetailsSection::Summary => PortDetailsSection::Process,
+            PortDetailsSection::Process => PortDetailsSection::Summary,
+        };
+        self.details_scroll = 0;
+    }
+
+    pub fn select_port_details_section_by_index(&mut self, index: usize) {
+        self.port_details_section = if index == 0 {
+            PortDetailsSection::Summary
+        } else {
+            PortDetailsSection::Process
+        };
+        self.details_scroll = 0;
+    }
+
+    pub fn select_next_connection_details_section(&mut self) {
+        self.connection_details_section = match self.connection_details_section {
+            ConnectionDetailsSection::Summary => ConnectionDetailsSection::Whois,
+            ConnectionDetailsSection::Whois => ConnectionDetailsSection::Summary,
+        };
+        self.details_scroll = 0;
+    }
+
+    pub fn select_previous_connection_details_section(&mut self) {
+        self.connection_details_section = match self.connection_details_section {
+            ConnectionDetailsSection::Summary => ConnectionDetailsSection::Whois,
+            ConnectionDetailsSection::Whois => ConnectionDetailsSection::Summary,
+        };
+        self.details_scroll = 0;
+    }
+
+    pub fn select_connection_details_section_by_index(&mut self, index: usize) {
+        self.connection_details_section = if index == 0 {
+            ConnectionDetailsSection::Summary
+        } else {
+            ConnectionDetailsSection::Whois
+        };
+        self.details_scroll = 0;
+    }
+
+    pub fn select_route_section_by_index(&mut self, index: usize) {
+        self.route_inspector.active_section = match index {
+            0 => RouteInspectorSection::Summary,
+            1 => RouteInspectorSection::PathViewer,
+            2 => RouteInspectorSection::VpnRoutes,
+            _ => RouteInspectorSection::Diagnostics,
         };
         self.details_scroll = 0;
     }
