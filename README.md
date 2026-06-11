@@ -111,19 +111,19 @@ cargo test
 GitHub Actions creates a release when a tag matching `v*` is pushed.
 
 ```bash
-git tag v0.2.3
-git push origin v0.2.3
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 You can also trigger the `Create Release Tag` workflow from GitHub Actions.
-Enter `0.2.3` or `v0.2.3` as the input, and it will:
+Enter `0.2.4` or `v0.2.4` as the input, and it will:
 
 - verify the version matches `Cargo.toml`
 - create an annotated `v*` tag
 - push the tag so the `Release` workflow builds artifacts and publishes the GitHub Release
 
 For crates.io publishing, trigger the `Publish Crate` workflow from GitHub Actions.
-Enter `0.2.3` or `v0.2.3`, and it will:
+Enter `0.2.4` or `v0.2.4`, and it will:
 
 - verify the version matches `Cargo.toml`
 - run `cargo publish --dry-run --locked`
