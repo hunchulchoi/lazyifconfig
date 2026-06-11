@@ -55,6 +55,12 @@ sudo apt update
 sudo apt install lazyifconfig
 ```
 
+From WinGet on Windows:
+
+```powershell
+winget install Choihunchul.Lazyifconfig
+```
+
 From crates.io:
 
 ```bash
@@ -142,6 +148,10 @@ After the same `Release` workflow finishes, the `Publish APT Repository` workflo
 the `amd64` and `arm64` `.deb` assets to `choihunchul/apt-repo`.
 You can also rerun `Publish APT Repository` manually from GitHub Actions by providing a tag such as `0.2.10` or `v0.2.10`.
 
+After the same `Release` workflow finishes, the `Publish WinGet Package` workflow opens a manifest bump pull request
+at `microsoft/winget-pkgs` for the Windows release asset.
+You can also rerun `Publish WinGet Package` manually from GitHub Actions by providing a tag such as `0.2.10` or `v0.2.10`.
+
 You can also trigger the `Create Release Tag` workflow from GitHub Actions.
 Enter `0.2.10` or `v0.2.10` as the input, and it will:
 
@@ -170,6 +180,14 @@ For APT publishing, add an `APT_REPO_TOKEN` secret with push access to
 - download the `amd64` and `arm64` `.deb` assets for the selected tag
 - update the APT package index and `Release` metadata in `choihunchul/apt-repo`
 - push the repository update so `apt install lazyifconfig` works after `apt update`
+
+For WinGet publishing, add a `WINGET_TOKEN` secret with a classic GitHub PAT that has the `public_repo` scope.
+Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) under the same account as this repository,
+merge at least one version of `Choihunchul.Lazyifconfig` manually, then the `Publish WinGet Package` workflow will:
+
+- download the Windows release zip for the selected tag
+- update the WinGet manifest in your `winget-pkgs` fork with Komac
+- open a pull request at `microsoft/winget-pkgs`
 
 The release workflow builds and uploads artifacts for:
 
