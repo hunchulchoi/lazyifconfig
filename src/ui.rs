@@ -5,7 +5,7 @@ use crate::app::{
 };
 use crate::model::{
     InterfaceStatus, NetworkKind, ProcessMetrics, RouteDiagnosticSeverity, RouteFamily,
-    RouteInspectorSection, Subnet,
+    RouteInspectorSection, RouteSortColumn, Subnet,
 };
 use crate::route_inspector::diagnostics::is_default_route;
 use crate::route_inspector::graph::{build_route_graph, render_route_graph_lines};
@@ -196,12 +196,18 @@ fn get_status_text(app: &App) -> String {
             } else if app.route_inspector.destination_input_active {
                 " destination: type | Enter lookup | Esc cancel | Backspace delete ".to_string()
             } else {
-                " q | u check | U update | R notes | Enter path | Tab section | / filter | o raw | i/n/c/p/e ".to_string()
+                format!(
+                    " q | u check | U update | R notes | Enter path | Tab section | / filter | s sort | S dir | o raw | sort:{} | i/n/c/p/e ",
+                    route_sort_label(app)
+                )
             }
         }
         ViewMode::Tools => {
             if app.tools.input_modal_open {
                 " input modal | type | Backspace | Tab field | Enter run | Esc cancel ".to_string()
+            } else if app.tools.selected_tool_is_dns_lookup() {
+                " q | Enter input | / input | r rerun | o raw | [/] scroll | i/n/p/c/g/e "
+                    .to_string()
             } else {
                 " q | Enter input | / input | r rerun | [/] scroll | i/n/p/c/g/e ".to_string()
             }
@@ -242,6 +248,22 @@ fn connection_sort_label(app: &App) -> String {
             ConnectionSortColumn::Proto => "Proto",
         },
         match app.connection_sort_direction {
+            SortDirection::Ascending => "asc",
+            SortDirection::Descending => "desc",
+        }
+    )
+}
+
+fn route_sort_label(app: &App) -> String {
+    format!(
+        "{} {}",
+        match app.route_inspector.sort_column {
+            RouteSortColumn::Destination => "Destination",
+            RouteSortColumn::Gateway => "Gateway",
+            RouteSortColumn::Interface => "Interface",
+            RouteSortColumn::Metric => "Metric",
+        },
+        match app.route_inspector.route_sort_direction {
             SortDirection::Ascending => "asc",
             SortDirection::Descending => "desc",
         }
@@ -1260,7 +1282,6 @@ fn render_tools_view(frame: &mut Frame, app: &App, list_area: Rect, details_area
             }
         }
     }
-
     frame.render_widget(
         Paragraph::new(result_lines)
             .wrap(Wrap { trim: true })
@@ -1274,8 +1295,40 @@ fn render_tools_view(frame: &mut Frame, app: &App, list_area: Rect, details_area
         .get(&definition.id)
         .map(|result| result.raw_output.as_str())
         .unwrap_or("Raw output appears here after a tool runs.");
+    let raw_output =
+        if definition.id == crate::tools::ToolId::DnsLookup && !app.tools.dns_raw_output_expanded {
+            "▶ Show Raw Output\nPress o to expand."
+        } else {
+            raw_output
+        };
+
+    let raw_lines: Vec<Line<'_>> = if raw_output.is_empty() {
+        vec![Line::from("")]
+    } else {
+        let mut iter = raw_output.lines();
+        let first = iter.next().unwrap_or("");
+        let mut lines = Vec::new();
+        let command_style = Style::default()
+            .fg(Color::Rgb(0, 255, 102))
+            .add_modifier(Modifier::BOLD);
+        let output_style = Style::default().fg(Color::Rgb(192, 255, 192));
+        if !first.is_empty() {
+            if first.starts_with("$ ") {
+                lines.push(Line::from(vec![
+                    Span::styled("$ ", command_style),
+                    Span::styled(&first[2..], command_style),
+                ]));
+            } else {
+                lines.push(Line::styled(first, output_style));
+            }
+        }
+        for line in iter {
+            lines.push(Line::styled(line.to_string(), output_style));
+        }
+        lines
+    };
     frame.render_widget(
-        Paragraph::new(raw_output.to_string())
+        Paragraph::new(raw_lines)
             .wrap(Wrap { trim: false })
             .scroll((app.tools.raw_scroll, 0))
             .block(Block::default().borders(Borders::ALL).title(" Raw Output ")),
@@ -2274,18 +2327,25 @@ fn diagnostic_color(severity: RouteDiagnosticSeverity) -> Color {
 }
 
 fn render_route_inspector_details(frame: &mut Frame, app: &App, area: Rect) {
-    let lines = match app.route_inspector.active_section {
-        RouteInspectorSection::Summary => route_summary_lines(app),
-        RouteInspectorSection::PathViewer => route_path_lines(app),
-        RouteInspectorSection::RouteTable => route_table_detail_lines(app),
-        RouteInspectorSection::VpnRoutes => vpn_route_lines(app),
-        RouteInspectorSection::Diagnostics => route_diagnostic_lines(app),
-    };
+    match app.route_inspector.active_section {
+        RouteInspectorSection::RouteTable => {
+            render_route_table(frame, app, Block::default(), area);
+        }
+        _ => {
+            let lines = match app.route_inspector.active_section {
+                RouteInspectorSection::Summary => route_summary_lines(app),
+                RouteInspectorSection::PathViewer => route_path_lines(app),
+                RouteInspectorSection::VpnRoutes => vpn_route_lines(app),
+                RouteInspectorSection::Diagnostics => route_diagnostic_lines(app),
+                RouteInspectorSection::RouteTable => unreachable!(),
+            };
 
-    let paragraph = Paragraph::new(lines)
-        .wrap(Wrap { trim: true })
-        .scroll((app.details_scroll, 0));
-    frame.render_widget(paragraph, area);
+            let paragraph = Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .scroll((app.details_scroll, 0));
+            frame.render_widget(paragraph, area);
+        }
+    }
 }
 
 fn route_summary_lines(app: &App) -> Vec<Line<'static>> {
@@ -2492,6 +2552,87 @@ fn route_table_detail_lines(app: &App) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+fn render_route_table(frame: &mut Frame, app: &App, block: Block<'_>, area: Rect) {
+    let header = Row::new([
+        Cell::from(route_header_label(
+            app,
+            RouteSortColumn::Destination,
+            "Destination",
+        )),
+        Cell::from(route_header_label(app, RouteSortColumn::Gateway, "Gateway")),
+        Cell::from(route_header_label(
+            app,
+            RouteSortColumn::Interface,
+            "Interface",
+        )),
+        Cell::from(route_header_label(app, RouteSortColumn::Metric, "Metric")),
+        Cell::from("Protocol"),
+        Cell::from("Flags"),
+        Cell::from("Family"),
+    ])
+    .style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let rows = app.filtered_sorted_routes().into_iter().map(|(_, route)| {
+        let metric = route
+            .metric
+            .map(|metric| metric.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let style = if is_default_route(route) {
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else if is_vpn_interface_name(&route.interface) {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default()
+        };
+
+        Row::new([
+            highlighted_filter_cell(route.destination.clone(), &app.route_inspector.route_filter),
+            highlighted_filter_cell(route.gateway.clone(), &app.route_inspector.route_filter),
+            highlighted_filter_cell(route.interface.clone(), &app.route_inspector.route_filter),
+            Cell::from(metric.clone()),
+            Cell::from(route.protocol.as_deref().unwrap_or("-")),
+            Cell::from(route.flags.as_deref().unwrap_or("-")),
+            Cell::from(route_family_label(route.family)),
+        ])
+        .style(style)
+    });
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(18),
+            Constraint::Length(16),
+            Constraint::Length(12),
+            Constraint::Length(8),
+            Constraint::Length(8),
+            Constraint::Length(7),
+            Constraint::Length(7),
+        ],
+    )
+    .header(header)
+    .column_spacing(1)
+    .block(block);
+    frame.render_widget(table, area);
+}
+
+fn route_header_label(app: &App, column: RouteSortColumn, label: &str) -> String {
+    if app.route_inspector.sort_column != column {
+        return label.to_string();
+    }
+
+    let arrow = match app.route_inspector.route_sort_direction {
+        SortDirection::Ascending => "↑",
+        SortDirection::Descending => "↓",
+    };
+    format!("{label} {arrow}")
 }
 
 fn vpn_route_lines(app: &App) -> Vec<Line<'static>> {
@@ -2800,6 +2941,53 @@ mod tests {
 
         assert!(rendered.contains("10.8.0.0/24"));
         assert!(!rendered.contains("192.168.0.1"));
+    }
+
+    #[test]
+    fn test_route_table_shows_sorted_headers() {
+        let app = route_test_app(RouteInspectorSection::RouteTable);
+        let backend = TestBackend::new(140, 32);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Destination ↑"));
+        assert!(rendered.contains("Gateway"));
+    }
+
+    #[test]
+    fn test_route_sort_direction_changes_order() {
+        let mut app = route_test_app(RouteInspectorSection::Summary);
+        app.current_snapshot = Some(NetworkSnapshot {
+            routes: vec![
+                route_entry("10.0.0.0/8", "192.168.0.1", "en0", RouteFamily::Ipv4),
+                route_entry("0.0.0.0/0", "10.0.0.2", "utun4", RouteFamily::Ipv4),
+            ],
+            ..NetworkSnapshot::default()
+        });
+        app.route_inspector.sort_column = RouteSortColumn::Metric;
+        app.route_inspector.route_sort_direction = SortDirection::Descending;
+        if let Some(snapshot) = app.current_snapshot.as_mut() {
+            snapshot.routes[0].metric = Some(20);
+            snapshot.routes[1].metric = Some(5);
+        }
+
+        let sorted = app
+            .filtered_sorted_routes()
+            .into_iter()
+            .map(|(_, route)| route.destination.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sorted,
+            vec!["10.0.0.0/8".to_string(), "0.0.0.0/0".to_string()]
+        );
     }
 
     #[test]
@@ -3201,7 +3389,7 @@ mod tests {
             let status = get_status_text(&app);
 
             assert!(!status.contains("Raw Output"));
-            let max_len = if mode == ViewMode::Routes { 100 } else { 90 };
+            let max_len = if mode == ViewMode::Routes { 170 } else { 90 };
             assert!(
                 status.len() <= max_len,
                 "status too long for {:?}: {}",

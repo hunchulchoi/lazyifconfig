@@ -111,6 +111,7 @@ pub struct ToolsState {
     pub errors: HashMap<ToolId, String>,
     pub states: HashMap<ToolId, ToolExecutionState>,
     pub raw_scroll: u16,
+    pub dns_raw_output_expanded: bool,
 }
 
 impl Default for ToolsState {
@@ -126,6 +127,7 @@ impl Default for ToolsState {
             errors: HashMap::new(),
             states: HashMap::new(),
             raw_scroll: 0,
+            dns_raw_output_expanded: true,
         }
     }
 }
@@ -149,6 +151,7 @@ impl ToolsState {
             self.selected_index = (self.selected_index + 1) % len;
             self.selected_field_index = 0;
             self.raw_scroll = 0;
+            self.dns_raw_output_expanded = true;
         }
     }
 
@@ -162,6 +165,7 @@ impl ToolsState {
             };
             self.selected_field_index = 0;
             self.raw_scroll = 0;
+            self.dns_raw_output_expanded = true;
         }
     }
 
@@ -180,6 +184,22 @@ impl ToolsState {
 
     pub fn start_input_editing(&mut self) {
         self.open_input_modal();
+    }
+
+    pub fn selected_tool_is_dns_lookup(&self) -> bool {
+        self.selected_tool_id() == ToolId::DnsLookup
+    }
+
+    pub fn toggle_dns_raw_output(&mut self) {
+        if self.selected_tool_is_dns_lookup() {
+            self.dns_raw_output_expanded = !self.dns_raw_output_expanded;
+        }
+    }
+
+    pub fn expand_dns_raw_output(&mut self) {
+        if self.selected_tool_is_dns_lookup() {
+            self.dns_raw_output_expanded = true;
+        }
     }
 
     pub fn stop_input_editing(&mut self) {
@@ -303,6 +323,7 @@ pub struct RouteInspectorState {
     pub route_filter: String,
     pub route_filter_active: bool,
     pub sort_column: RouteSortColumn,
+    pub route_sort_direction: SortDirection,
 }
 
 impl Default for RouteInspectorState {
@@ -317,6 +338,7 @@ impl Default for RouteInspectorState {
             route_filter: String::new(),
             route_filter_active: false,
             sort_column: RouteSortColumn::Destination,
+            route_sort_direction: SortDirection::Ascending,
         }
     }
 }
@@ -547,10 +569,56 @@ impl App {
         self.restore_selected_connection(selected_connection_index);
     }
 
+    pub fn cycle_route_sort_column(&mut self) {
+        let selected_route_index = self.selected_route_index();
+        self.route_inspector.sort_column = match self.route_inspector.sort_column {
+            RouteSortColumn::Destination => RouteSortColumn::Gateway,
+            RouteSortColumn::Gateway => RouteSortColumn::Interface,
+            RouteSortColumn::Interface => RouteSortColumn::Metric,
+            RouteSortColumn::Metric => RouteSortColumn::Destination,
+        };
+        self.route_inspector.route_sort_direction = SortDirection::Ascending;
+        self.update_navigation_items();
+        self.restore_selected_route(selected_route_index);
+    }
+
+    pub fn toggle_route_sort_direction(&mut self) {
+        self.route_inspector.route_sort_direction = match self.route_inspector.route_sort_direction
+        {
+            SortDirection::Ascending => SortDirection::Descending,
+            SortDirection::Descending => SortDirection::Ascending,
+        };
+        let selected_route_index = self.selected_route_index();
+        self.update_navigation_items();
+        self.restore_selected_route(selected_route_index);
+    }
+
     fn restore_selected_listening_port(&mut self, selected_port_index: Option<usize>) {
         if let Some(selected_port_index) = selected_port_index {
             if let Some(index) = self.navigation_items.iter().position(|item| {
                 matches!(item, NavigationItem::ListeningPort { index, .. } if *index == selected_port_index)
+            }) {
+                self.selected_index = index;
+                return;
+            }
+        }
+
+        if self.selected_index >= self.navigation_items.len() {
+            self.selected_index = self.navigation_items.len().saturating_sub(1);
+        }
+    }
+
+    fn selected_route_index(&self) -> Option<usize> {
+        match self.navigation_items.get(self.selected_index)? {
+            NavigationItem::Route { index, .. } => Some(*index),
+            _ => None,
+        }
+    }
+
+    fn restore_selected_route(&mut self, selected_route_index: Option<usize>) {
+        if let Some(selected_route_index) = selected_route_index {
+            if let Some(index) = self.navigation_items.iter().position(|item| {
+                matches!(item, NavigationItem::Route { index, .. } if *index == selected_route_index)
             }) {
                 self.selected_index = index;
                 return;
@@ -676,16 +744,22 @@ impl App {
             })
             .collect();
 
-        match self.route_inspector.sort_column {
-            RouteSortColumn::Destination => {
-                routes.sort_by(|(_, a), (_, b)| a.destination.cmp(&b.destination))
+        routes.sort_by(|(_, a), (_, b)| {
+            let ordering = match self.route_inspector.sort_column {
+                RouteSortColumn::Destination => a.destination.cmp(&b.destination),
+                RouteSortColumn::Gateway => a.gateway.cmp(&b.gateway),
+                RouteSortColumn::Interface => a.interface.cmp(&b.interface),
+                RouteSortColumn::Metric => a
+                    .metric
+                    .unwrap_or(u32::MAX)
+                    .cmp(&b.metric.unwrap_or(u32::MAX)),
+            };
+
+            match self.route_inspector.route_sort_direction {
+                SortDirection::Ascending => ordering,
+                SortDirection::Descending => ordering.reverse(),
             }
-            RouteSortColumn::Gateway => routes.sort_by(|(_, a), (_, b)| a.gateway.cmp(&b.gateway)),
-            RouteSortColumn::Interface => {
-                routes.sort_by(|(_, a), (_, b)| a.interface.cmp(&b.interface))
-            }
-            RouteSortColumn::Metric => routes.sort_by_key(|(_, route)| route.metric),
-        }
+        });
 
         routes
     }

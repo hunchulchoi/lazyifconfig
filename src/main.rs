@@ -629,6 +629,8 @@ fn start_selected_tool(app: &mut App) {
         return;
     }
 
+    app.tools.expand_dns_raw_output();
+
     let input = app.tools.input_for_selected_tool().clone();
     app.tools.errors.remove(&tool_id);
     app.tools
@@ -1013,11 +1015,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             app.help_visible = false;
                             start_selected_tool(&mut app);
                         }
+                        KeyCode::Char('o') | KeyCode::Char('ㅐ') => {
+                            if app.tools.selected_tool_is_dns_lookup() {
+                                app.tools.toggle_dns_raw_output();
+                                app.tools.raw_scroll = 0;
+                            }
+                        }
                         KeyCode::Char('[') => {
-                            app.tools.raw_scroll = app.tools.raw_scroll.saturating_sub(1);
+                            if !app.tools.selected_tool_is_dns_lookup()
+                                || app.tools.dns_raw_output_expanded
+                            {
+                                app.tools.raw_scroll = app.tools.raw_scroll.saturating_sub(1);
+                            }
                         }
                         KeyCode::Char(']') => {
-                            app.tools.raw_scroll = app.tools.raw_scroll.saturating_add(1);
+                            if !app.tools.selected_tool_is_dns_lookup()
+                                || app.tools.dns_raw_output_expanded
+                            {
+                                app.tools.raw_scroll = app.tools.raw_scroll.saturating_add(1);
+                            }
                         }
                         _ => {}
                     }
@@ -1166,6 +1182,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             app.cycle_port_sort_column();
                         } else if app.view_mode == ViewMode::Connections {
                             app.cycle_connection_sort_column();
+                        } else if app.view_mode == ViewMode::Routes {
+                            app.cycle_route_sort_column();
                         }
                     }
                     KeyCode::Char('S') => {
@@ -1193,6 +1211,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             app.toggle_port_sort_direction();
                         } else if app.view_mode == ViewMode::Connections {
                             app.toggle_connection_sort_direction();
+                        } else if app.view_mode == ViewMode::Routes {
+                            app.toggle_route_sort_direction();
                         }
                     }
                     KeyCode::Char('a') | KeyCode::Char('ㅁ') => {
