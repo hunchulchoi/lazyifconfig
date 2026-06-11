@@ -162,30 +162,30 @@ cargo test
 GitHub Actions creates a release when a tag matching `v*` is pushed.
 
 ```bash
-git tag v0.2.10
-git push origin v0.2.10
+git tag v0.2.11
+git push origin v0.2.11
 ```
 
 After the `Release` workflow finishes, the Homebrew tap workflow runs automatically and updates `choihunchul/homebrew-tap`.
-You can also rerun `Publish Homebrew Tap` manually from GitHub Actions by providing a tag such as `0.2.10` or `v0.2.10`.
+You can also rerun `Publish Homebrew Tap` manually from GitHub Actions by providing a tag such as `0.2.11` or `v0.2.11`.
 
 After the same `Release` workflow finishes, the `Publish APT Repository` workflow runs automatically and publishes
 the `amd64` and `arm64` `.deb` assets to `choihunchul/apt-repo`.
-You can also rerun `Publish APT Repository` manually from GitHub Actions by providing a tag such as `0.2.10` or `v0.2.10`.
+You can also rerun `Publish APT Repository` manually from GitHub Actions by providing a tag such as `0.2.11` or `v0.2.11`.
 
 After the same `Release` workflow finishes, the `Publish WinGet Package` workflow opens a WinGet manifest bump PR
 against `microsoft/winget-pkgs` for the matching Windows release asset.
-You can also rerun `Publish WinGet Package` manually from GitHub Actions by providing a tag such as `0.2.10` or `v0.2.10`.
+You can also rerun `Publish WinGet Package` manually from GitHub Actions by providing a tag such as `0.2.11` or `v0.2.11`.
 
 You can also trigger the `Create Release Tag` workflow from GitHub Actions.
-Enter `0.2.10` or `v0.2.10` as the input, and it will:
+Enter `0.2.11` or `v0.2.11` as the input, and it will:
 
 - verify the version matches `Cargo.toml`
 - create an annotated `v*` tag
 - push the tag so the `Release` workflow builds artifacts and publishes the GitHub Release
 
 For crates.io publishing, trigger the `Publish Crate` workflow from GitHub Actions.
-Enter `0.2.10` or `v0.2.10`, and it will:
+Enter `0.2.11` or `v0.2.11`, and it will:
 
 - verify the version matches `Cargo.toml`
 - run `cargo publish --dry-run --locked`
