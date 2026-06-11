@@ -1961,40 +1961,34 @@ fn route_diagnostic_lines(app: &App) -> Vec<Line<'static>> {
         if index > 0 {
             lines.push(Line::from(""));
         }
+        let severity_style = Style::default().fg(diagnostic_color(diagnostic.severity));
+        let severity_bold_style = severity_style.add_modifier(Modifier::BOLD);
         lines.push(Line::from(Span::styled(
             diagnostic.title.clone(),
-            Style::default()
-                .fg(diagnostic_color(diagnostic.severity))
-                .add_modifier(Modifier::BOLD),
+            severity_bold_style,
         )));
         lines.push(Line::from(vec![
-            Span::styled(
-                "Description: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(diagnostic.description.clone()),
+            Span::styled("Description: ", severity_bold_style),
+            Span::styled(diagnostic.description.clone(), severity_style),
         ]));
         if let Some(route) = &diagnostic.affected_route {
             lines.push(Line::from(vec![
+                Span::styled("Affected Route: ", severity_bold_style),
                 Span::styled(
-                    "Affected Route: ",
-                    Style::default().add_modifier(Modifier::BOLD),
+                    format!(
+                        "{} via {} dev {} ({})",
+                        route.destination,
+                        route.gateway,
+                        route.interface,
+                        route_family_label(route.family),
+                    ),
+                    severity_style,
                 ),
-                Span::raw(format!(
-                    "{} via {} dev {} ({})",
-                    route.destination,
-                    route.gateway,
-                    route.interface,
-                    route_family_label(route.family),
-                )),
             ]));
         }
         lines.push(Line::from(vec![
-            Span::styled(
-                "Recommendation: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(diagnostic.recommendation.clone()),
+            Span::styled("Recommendation: ", severity_bold_style),
+            Span::styled(diagnostic.recommendation.clone(), severity_style),
         ]));
     }
 
@@ -2168,6 +2162,33 @@ mod tests {
         assert!(rendered.contains("Diagnostics"));
         assert!(rendered.contains("Route interface is down"));
         assert!(rendered.contains("Recommendation"));
+    }
+
+    #[test]
+    fn test_route_diagnostics_color_all_diagnostic_components_by_severity() {
+        let mut app = route_test_app(RouteInspectorSection::Diagnostics);
+        app.route_inspector.diagnostics = vec![RouteDiagnostic {
+            severity: RouteDiagnosticSeverity::Warning,
+            title: "Route interface is down".to_string(),
+            description: "A route points to an interface that is currently down.".to_string(),
+            affected_route: Some(route_entry(
+                "default",
+                "192.168.0.1",
+                "en0",
+                RouteFamily::Ipv4,
+            )),
+            recommendation: "Bring the interface up or remove the stale route.".to_string(),
+        }];
+
+        let lines = route_diagnostic_lines(&app);
+
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[3].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[3].spans[1].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[4].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[4].spans[1].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[5].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[5].spans[1].style.fg, Some(Color::Yellow));
     }
 
     #[test]
