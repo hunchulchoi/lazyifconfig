@@ -1,23 +1,28 @@
-use std::io;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
-use lazyifconfig::app::{App, ViewMode, NavigationItem};
-use lazyifconfig::command::{
-    default_route_command_spec, interface_command_spec, route_table_command_spec,
-    listening_ports_command_spec, run_command_capture, run_kill, run_netstat_ib,
-};
-use lazyifconfig::collector::interface::{parse_interfaces, merge_gateways};
-use lazyifconfig::collector::stats::merge_stats;
+use lazyifconfig::app::{App, NavigationItem, ViewMode};
 use lazyifconfig::collector::connections::parse_connections;
+use lazyifconfig::collector::interface::{merge_gateways, parse_interfaces};
 use lazyifconfig::collector::ports::parse_listening_ports;
-use lazyifconfig::collector::routes::parse_routes;
-use lazyifconfig::model::{NetworkSnapshot, PublicIpInfo, NetworkEvent, NetworkEventKind, EventSeverity, CommandSourceId, CommandOutput};
+use lazyifconfig::collector::routes::{
+    parse_linux_route_path, parse_macos_route_path, parse_routes,
+};
+use lazyifconfig::collector::stats::merge_stats;
+use lazyifconfig::command::{
+    default_route_command_spec, interface_command_spec, listening_ports_command_spec,
+    route_table_command_spec, run_command_capture, run_kill, run_netstat_ib,
+};
+use lazyifconfig::model::{
+    CommandOutput, CommandSourceId, EventSeverity, NetworkEvent, NetworkEventKind, NetworkSnapshot,
+    PublicIpInfo, RouteInspectorSection,
+};
 use lazyifconfig::update::{self, CheckOutcome, UpdateMessage, UpdateStatus};
+use ratatui::{backend::CrosstermBackend, Terminal};
+use std::io;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RELEASE_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
 
@@ -43,7 +48,7 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
     );
     let raw_out = raw_out_res?;
     let mut parsed = parse_interfaces(&raw_out);
-    
+
     let route_table_command = route_table_command_spec();
     let netstat_out_res = capture_command_output(
         app,
@@ -56,13 +61,13 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
     if let Some(out) = &netstat_out {
         merge_gateways(&mut parsed, out);
     }
-    
+
     let routes = if let Some(out) = &netstat_out {
         parse_routes(out)
     } else {
         Vec::new()
     };
-    
+
     let default_route_command = default_route_command_spec();
     let _ = capture_command_output(
         app,
@@ -72,10 +77,24 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
         default_route_command.args,
     );
 
+    if let Some(command) = lazyifconfig::command::ipv6_route_table_command_spec() {
+        let _ = capture_owned_command_output(app, CommandSourceId::Ipv6Routes, &command);
+    }
+
+    if let Some(command) = lazyifconfig::command::ip_rule_command_spec() {
+        let _ = capture_owned_command_output(app, CommandSourceId::IpRules, &command);
+    }
+
     let stats_out = run_netstat_ib().unwrap_or_else(|_| raw_out.clone());
     let merged = merge_stats(&stats_out, parsed);
 
-    let connections_res = capture_command_output(app, CommandSourceId::NetstatConnections, "netstat -an", "netstat", &["-an"]);
+    let connections_res = capture_command_output(
+        app,
+        CommandSourceId::NetstatConnections,
+        "netstat -an",
+        "netstat",
+        &["-an"],
+    );
     let connections = if let Ok(netstat_an_out) = &connections_res {
         parse_connections(netstat_an_out)
     } else {
@@ -95,7 +114,7 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
     } else {
         Vec::new()
     };
-    
+
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -113,17 +132,34 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
         let async_outputs_clone = app.async_command_outputs.clone();
         tokio::spawn(async move {
             let start_time = std::time::SystemTime::now();
-            let raw_json_capture = run_command_capture("curl", &["-s", "-m", "5", "https://ipinfo.io/json"]);
-            let raw_json_res = raw_json_capture.as_ref().map(command_stdout).unwrap_or_else(|e| Err(e.clone()));
-            
+            let raw_json_capture =
+                run_command_capture("curl", &["-s", "-m", "5", "https://ipinfo.io/json"]);
+            let raw_json_res = raw_json_capture
+                .as_ref()
+                .map(command_stdout)
+                .unwrap_or_else(|e| Err(e.clone()));
+
             if let Ok(mut lock) = async_outputs_clone.lock() {
-                lock.insert(CommandSourceId::PublicIp, CommandOutput {
-                    command: "curl -s -m 5 https://ipinfo.io/json".to_string(),
-                    stdout: raw_json_capture.as_ref().map(|out| out.stdout.clone()).unwrap_or_default(),
-                    stderr: raw_json_capture.as_ref().map(|out| out.stderr.clone()).unwrap_or_else(|e| e.clone()),
-                    executed_at: start_time,
-                    exit_code: raw_json_capture.as_ref().ok().and_then(|out| out.exit_code).or(Some(1)),
-                });
+                lock.insert(
+                    CommandSourceId::PublicIp,
+                    CommandOutput {
+                        command: "curl -s -m 5 https://ipinfo.io/json".to_string(),
+                        stdout: raw_json_capture
+                            .as_ref()
+                            .map(|out| out.stdout.clone())
+                            .unwrap_or_default(),
+                        stderr: raw_json_capture
+                            .as_ref()
+                            .map(|out| out.stderr.clone())
+                            .unwrap_or_else(|e| e.clone()),
+                        executed_at: start_time,
+                        exit_code: raw_json_capture
+                            .as_ref()
+                            .ok()
+                            .and_then(|out| out.exit_code)
+                            .or(Some(1)),
+                    },
+                );
             }
 
             if let Ok(raw_json) = raw_json_res {
@@ -156,7 +192,10 @@ pub fn tick_update(app: &mut App) -> Result<(), String> {
 
             if let Some(old_info) = &app.current_public_ip_info {
                 if old_info.ip != new_info.ip {
-                    ip_changed_msg = Some(format!("Public IP Changed: {} -> {}", old_info.ip, new_info.ip));
+                    ip_changed_msg = Some(format!(
+                        "Public IP Changed: {} -> {}",
+                        old_info.ip, new_info.ip
+                    ));
                     changed = true;
                 }
                 if old_info.provider != new_info.provider {
@@ -210,13 +249,37 @@ fn capture_command_output(
 ) -> Result<String, String> {
     let captured = run_command_capture(program, args)?;
     let result = command_stdout(&captured);
-    app.command_outputs.insert(source_id, CommandOutput {
-        command: command.to_string(),
-        stdout: captured.stdout,
-        stderr: captured.stderr,
-        executed_at: std::time::SystemTime::now(),
-        exit_code: captured.exit_code,
-    });
+    app.command_outputs.insert(
+        source_id,
+        CommandOutput {
+            command: command.to_string(),
+            stdout: captured.stdout,
+            stderr: captured.stderr,
+            executed_at: std::time::SystemTime::now(),
+            exit_code: captured.exit_code,
+        },
+    );
+    result
+}
+
+fn capture_owned_command_output(
+    app: &mut App,
+    source_id: CommandSourceId,
+    command: &lazyifconfig::command::OwnedCommandSpec,
+) -> Result<String, String> {
+    let args: Vec<&str> = command.args.iter().map(String::as_str).collect();
+    let captured = run_command_capture(command.program.as_str(), &args)?;
+    let result = command_stdout(&captured);
+    app.command_outputs.insert(
+        source_id,
+        CommandOutput {
+            command: command.display.clone(),
+            stdout: captured.stdout,
+            stderr: captured.stderr,
+            executed_at: std::time::SystemTime::now(),
+            exit_code: captured.exit_code,
+        },
+    );
     result
 }
 
@@ -228,6 +291,74 @@ fn command_stdout(output: &lazyifconfig::command::CommandResult) -> Result<Strin
     } else {
         Err(output.stderr.clone())
     }
+}
+
+fn run_route_path_lookup(app: &mut App) {
+    let destination = app.route_inspector.destination_input.trim().to_string();
+    if destination.is_empty() {
+        app.route_inspector.latest_path_result = None;
+        app.route_inspector.latest_path_error = Some("Enter a destination first.".to_string());
+        return;
+    }
+
+    let command = lazyifconfig::command::route_path_command_spec(&destination);
+    match capture_owned_command_output(app, CommandSourceId::RoutePath, &command) {
+        Ok(output) => {
+            let parsed = if cfg!(target_os = "linux") {
+                parse_linux_route_path(&destination, &output)
+            } else {
+                parse_macos_route_path(&destination, &output)
+            };
+
+            match parsed {
+                Ok(mut result) => {
+                    result.is_vpn = result
+                        .interface
+                        .as_deref()
+                        .map(lazyifconfig::route_inspector::vpn::is_vpn_interface_name)
+                        .unwrap_or(false);
+                    app.route_inspector.latest_path_result = Some(result);
+                    app.route_inspector.latest_path_error = None;
+                }
+                Err(error) => {
+                    app.route_inspector.latest_path_result = None;
+                    app.route_inspector.latest_path_error = Some(error);
+                }
+            }
+        }
+        Err(error) => {
+            app.route_inspector.latest_path_result = None;
+            app.route_inspector.latest_path_error = Some(format!(
+                "{destination} could not be resolved by route command: {error}"
+            ));
+        }
+    }
+}
+
+fn routes_raw_sources(app: &App) -> Vec<CommandSourceId> {
+    let mut sources = vec![
+        CommandSourceId::NetstatRoutes,
+        CommandSourceId::DefaultRoute,
+    ];
+    if app
+        .command_outputs
+        .contains_key(&CommandSourceId::Ipv6Routes)
+    {
+        sources.push(CommandSourceId::Ipv6Routes);
+    }
+    if app.command_outputs.contains_key(&CommandSourceId::IpRules) {
+        sources.push(CommandSourceId::IpRules);
+    }
+    if app
+        .command_outputs
+        .contains_key(&CommandSourceId::RoutePath)
+    {
+        sources.push(CommandSourceId::RoutePath);
+    }
+    if app.command_outputs.contains_key(&CommandSourceId::PublicIp) {
+        sources.push(CommandSourceId::PublicIp);
+    }
+    sources
 }
 
 fn maybe_start_auto_update_check(app: &mut App) {
@@ -461,7 +592,6 @@ fn drain_update_messages(app: &mut App) {
     }
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
@@ -495,7 +625,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             KeyCode::Enter => {
                                 app.raw_viewer.search_active = false;
                                 if !app.raw_viewer.search_matches.is_empty() {
-                                    app.raw_viewer.scroll = app.raw_viewer.search_matches[0].line_index as u16;
+                                    app.raw_viewer.scroll =
+                                        app.raw_viewer.search_matches[0].line_index as u16;
                                 }
                             }
                             KeyCode::Backspace => {
@@ -510,16 +641,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else {
                         match key.code {
-                            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') | KeyCode::Char('ㅐ') => {
+                            KeyCode::Esc
+                            | KeyCode::Char('q')
+                            | KeyCode::Char('o')
+                            | KeyCode::Char('ㅐ') => {
                                 app.raw_viewer.active = false;
                             }
                             KeyCode::Tab => {
-                                app.raw_viewer.selected_index = (app.raw_viewer.selected_index + 1) % app.raw_viewer.sources.len();
+                                app.raw_viewer.selected_index = (app.raw_viewer.selected_index + 1)
+                                    % app.raw_viewer.sources.len();
                                 app.raw_viewer.scroll = 0;
                                 app.update_raw_viewer_search_matches();
                             }
                             KeyCode::BackTab => {
-                                app.raw_viewer.selected_index = (app.raw_viewer.selected_index + app.raw_viewer.sources.len() - 1) % app.raw_viewer.sources.len();
+                                app.raw_viewer.selected_index = (app.raw_viewer.selected_index
+                                    + app.raw_viewer.sources.len()
+                                    - 1)
+                                    % app.raw_viewer.sources.len();
                                 app.raw_viewer.scroll = 0;
                                 app.update_raw_viewer_search_matches();
                             }
@@ -548,19 +686,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             KeyCode::Char('n') => {
                                 if !app.raw_viewer.search_matches.is_empty() {
-                                    app.raw_viewer.current_match_index = (app.raw_viewer.current_match_index + 1) % app.raw_viewer.search_matches.len();
-                                    app.raw_viewer.scroll = app.raw_viewer.search_matches[app.raw_viewer.current_match_index].line_index as u16;
+                                    app.raw_viewer.current_match_index =
+                                        (app.raw_viewer.current_match_index + 1)
+                                            % app.raw_viewer.search_matches.len();
+                                    app.raw_viewer.scroll = app.raw_viewer.search_matches
+                                        [app.raw_viewer.current_match_index]
+                                        .line_index
+                                        as u16;
                                 }
                             }
                             KeyCode::Char('N') => {
                                 if !app.raw_viewer.search_matches.is_empty() {
-                                    app.raw_viewer.current_match_index = (app.raw_viewer.current_match_index + app.raw_viewer.search_matches.len() - 1) % app.raw_viewer.search_matches.len();
-                                    app.raw_viewer.scroll = app.raw_viewer.search_matches[app.raw_viewer.current_match_index].line_index as u16;
+                                    app.raw_viewer.current_match_index =
+                                        (app.raw_viewer.current_match_index
+                                            + app.raw_viewer.search_matches.len()
+                                            - 1)
+                                            % app.raw_viewer.search_matches.len();
+                                    app.raw_viewer.scroll = app.raw_viewer.search_matches
+                                        [app.raw_viewer.current_match_index]
+                                        .line_index
+                                        as u16;
                                 }
                             }
                             KeyCode::Char('y') => {
-                                if let Some(&src_id) = app.raw_viewer.sources.get(app.raw_viewer.selected_index) {
-                                    let _ = lazyifconfig::command::copy_to_clipboard(src_id.as_str());
+                                if let Some(&src_id) =
+                                    app.raw_viewer.sources.get(app.raw_viewer.selected_index)
+                                {
+                                    let _ =
+                                        lazyifconfig::command::copy_to_clipboard(src_id.as_str());
                                     app.recent_events.push(NetworkEvent::new(
                                         NetworkEventKind::ActionCopied,
                                         EventSeverity::Info,
@@ -569,7 +722,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             KeyCode::Char('Y') => {
-                                if let Some(&src_id) = app.raw_viewer.sources.get(app.raw_viewer.selected_index) {
+                                if let Some(&src_id) =
+                                    app.raw_viewer.sources.get(app.raw_viewer.selected_index)
+                                {
                                     if let Some(out) = app.command_outputs.get(&src_id) {
                                         let text = format!("{}\n{}", out.stdout, out.stderr);
                                         let _ = lazyifconfig::command::copy_to_clipboard(&text);
@@ -619,6 +774,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
 
+                if app.route_inspector.destination_input_active {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.route_inspector.destination_input_active = false;
+                        }
+                        KeyCode::Enter => {
+                            app.route_inspector.destination_input_active = false;
+                            run_route_path_lookup(&mut app);
+                        }
+                        KeyCode::Backspace => {
+                            app.route_inspector.destination_input.pop();
+                        }
+                        KeyCode::Char(c) => {
+                            app.route_inspector.destination_input.push(c);
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                if app.route_inspector.route_filter_active {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.route_inspector.route_filter.clear();
+                            app.route_inspector.route_filter_active = false;
+                            app.update_navigation_items();
+                        }
+                        KeyCode::Enter => {
+                            app.route_inspector.route_filter_active = false;
+                        }
+                        KeyCode::Backspace => {
+                            app.route_inspector.route_filter.pop();
+                            app.update_navigation_items();
+                            app.selected_index = 0;
+                        }
+                        KeyCode::Char(c) => {
+                            app.route_inspector.route_filter.push(c);
+                            app.update_navigation_items();
+                            app.selected_index = 0;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 // --- Filter mode: intercept all input ---
                 if app.port_filter_active {
                     match key.code {
@@ -656,11 +856,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('o') | KeyCode::Char('ㅐ') => {
                         app.help_visible = false;
                         let sources = match app.view_mode {
-                            ViewMode::Interface | ViewMode::Network => vec![CommandSourceId::Ifconfig],
+                            ViewMode::Interface | ViewMode::Network => {
+                                vec![CommandSourceId::Ifconfig]
+                            }
                             ViewMode::Connections => vec![CommandSourceId::NetstatConnections],
                             ViewMode::Ports => vec![CommandSourceId::LsofPorts],
-                            ViewMode::Routes => vec![CommandSourceId::NetstatRoutes, CommandSourceId::DefaultRoute, CommandSourceId::PublicIp],
-                            ViewMode::Timeline => vec![CommandSourceId::Ifconfig, CommandSourceId::NetstatRoutes, CommandSourceId::DefaultRoute, CommandSourceId::PublicIp, CommandSourceId::GitHubRelease],
+                            ViewMode::Routes => routes_raw_sources(&app),
+                            ViewMode::Timeline => vec![
+                                CommandSourceId::Ifconfig,
+                                CommandSourceId::NetstatRoutes,
+                                CommandSourceId::DefaultRoute,
+                                CommandSourceId::PublicIp,
+                                CommandSourceId::GitHubRelease,
+                            ],
                         };
                         if !sources.is_empty() {
                             app.raw_viewer.active = true;
@@ -697,32 +905,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('k') | KeyCode::Up | KeyCode::Char('ㅏ') => {
                         app.select_previous();
                     }
+                    KeyCode::Tab => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_next_route_section();
+                        }
+                    }
+                    KeyCode::BackTab => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.select_previous_route_section();
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if app.view_mode == ViewMode::Routes {
+                            app.route_inspector.destination_input_active = true;
+                            app.route_inspector.active_section = RouteInspectorSection::PathViewer;
+                        }
+                    }
                     KeyCode::Char('K') => {
                         app.help_visible = false;
                         if app.view_mode == ViewMode::Ports {
                             // Kill the selected process
-                            if let Some(NavigationItem::ListeningPort { pid, command, port, .. }) =
-                                app.navigation_items.get(app.selected_index)
+                            if let Some(NavigationItem::ListeningPort {
+                                pid, command, port, ..
+                            }) = app.navigation_items.get(app.selected_index)
                             {
                                 let pid = pid.clone();
                                 let command = command.clone();
                                 let port = port.clone();
                                 match run_kill(&pid) {
                                     Ok(()) => {
-                                        app.recent_events.push(lazyifconfig::model::NetworkEvent::new(
+                                        app.recent_events
+                                            .push(lazyifconfig::model::NetworkEvent::new(
                                             lazyifconfig::model::NetworkEventKind::ProcessKilled,
                                             lazyifconfig::model::EventSeverity::Info,
-                                            format!("Killed {} (PID: {}) on :{}", command, pid, port),
+                                            format!(
+                                                "Killed {} (PID: {}) on :{}",
+                                                command, pid, port
+                                            ),
                                         ));
                                         let _ = tick_update(&mut app);
                                         last_tick = std::time::Instant::now();
                                     }
                                     Err(e) => {
-                                        app.recent_events.push(lazyifconfig::model::NetworkEvent::new(
-                                            lazyifconfig::model::NetworkEventKind::SystemError,
-                                            lazyifconfig::model::EventSeverity::Error,
-                                            format!("Kill failed (PID: {}): {}", pid, e),
-                                        ));
+                                        app.recent_events.push(
+                                            lazyifconfig::model::NetworkEvent::new(
+                                                lazyifconfig::model::NetworkEventKind::SystemError,
+                                                lazyifconfig::model::EventSeverity::Error,
+                                                format!("Kill failed (PID: {}): {}", pid, e),
+                                            ),
+                                        );
                                     }
                                 }
                                 if app.recent_events.len() > 100 {
@@ -736,6 +967,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         app.help_visible = false;
                         if app.view_mode == ViewMode::Ports {
                             app.port_filter_active = true;
+                        }
+                    }
+                    KeyCode::Char('/') => {
+                        app.help_visible = false;
+                        match app.view_mode {
+                            ViewMode::Ports => app.port_filter_active = true,
+                            ViewMode::Routes => app.route_inspector.route_filter_active = true,
+                            _ => {}
                         }
                     }
                     KeyCode::Char('a') | KeyCode::Char('ㅁ') => {
@@ -767,29 +1006,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('c') | KeyCode::Char('ㅊ') => {
                         app.help_visible = false;
                         if app.view_mode == ViewMode::Connections {
-                            if let Some(NavigationItem::Connection { foreign, .. }) = app.navigation_items.get(app.selected_index) {
+                            if let Some(NavigationItem::Connection { foreign, .. }) =
+                                app.navigation_items.get(app.selected_index)
+                            {
                                 let foreign_ip = if let Some(pos) = foreign.rfind(':') {
                                     &foreign[..pos]
                                 } else {
                                     foreign.as_str()
                                 };
-                                if foreign_ip != "*" && foreign_ip != "::" && foreign_ip != "0.0.0.0" && foreign_ip != "*.*" {
-                                    if let Err(e) = lazyifconfig::command::copy_to_clipboard(foreign_ip) {
-                                        app.recent_events.push(lazyifconfig::model::NetworkEvent::new(
-                                            lazyifconfig::model::NetworkEventKind::SystemError,
-                                            lazyifconfig::model::EventSeverity::Error,
-                                            format!("Failed to copy IP: {}", e),
-                                        ));
+                                if foreign_ip != "*"
+                                    && foreign_ip != "::"
+                                    && foreign_ip != "0.0.0.0"
+                                    && foreign_ip != "*.*"
+                                {
+                                    if let Err(e) =
+                                        lazyifconfig::command::copy_to_clipboard(foreign_ip)
+                                    {
+                                        app.recent_events.push(
+                                            lazyifconfig::model::NetworkEvent::new(
+                                                lazyifconfig::model::NetworkEventKind::SystemError,
+                                                lazyifconfig::model::EventSeverity::Error,
+                                                format!("Failed to copy IP: {}", e),
+                                            ),
+                                        );
                                         if app.recent_events.len() > 100 {
                                             let overflow = app.recent_events.len() - 100;
                                             app.recent_events.drain(0..overflow);
                                         }
                                     } else {
-                                        app.recent_events.push(lazyifconfig::model::NetworkEvent::new(
-                                            lazyifconfig::model::NetworkEventKind::ActionCopied,
-                                            lazyifconfig::model::EventSeverity::Info,
-                                            format!("Copied IP {} to clipboard", foreign_ip),
-                                        ));
+                                        app.recent_events.push(
+                                            lazyifconfig::model::NetworkEvent::new(
+                                                lazyifconfig::model::NetworkEventKind::ActionCopied,
+                                                lazyifconfig::model::EventSeverity::Info,
+                                                format!("Copied IP {} to clipboard", foreign_ip),
+                                            ),
+                                        );
                                         if app.recent_events.len() > 100 {
                                             let overflow = app.recent_events.len() - 100;
                                             app.recent_events.drain(0..overflow);
@@ -804,43 +1055,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('w') | KeyCode::Char('ㅈ') => {
                         app.help_visible = false;
                         if app.view_mode == ViewMode::Connections {
-                            if let Some(NavigationItem::Connection { foreign, .. }) = app.navigation_items.get(app.selected_index) {
+                            if let Some(NavigationItem::Connection { foreign, .. }) =
+                                app.navigation_items.get(app.selected_index)
+                            {
                                 let foreign_ip = if let Some(pos) = foreign.rfind(':') {
                                     &foreign[..pos]
                                 } else {
                                     foreign.as_str()
                                 };
-                                if foreign_ip != "*" && foreign_ip != "::" && foreign_ip != "0.0.0.0" && foreign_ip != "*.*" {
+                                if foreign_ip != "*"
+                                    && foreign_ip != "::"
+                                    && foreign_ip != "0.0.0.0"
+                                    && foreign_ip != "*.*"
+                                {
                                     let mut should_fetch = false;
                                     if let Ok(lock) = app.whois_cache.lock() {
-                                        if !lock.contains_key(foreign_ip) || lock.get(foreign_ip).map(|s| s.as_str()) != Some("Loading...") {
+                                        if !lock.contains_key(foreign_ip)
+                                            || lock.get(foreign_ip).map(|s| s.as_str())
+                                                != Some("Loading...")
+                                        {
                                             should_fetch = true;
                                         }
                                     }
-                                    
+
                                     if should_fetch {
                                         if let Ok(mut lock) = app.whois_cache.lock() {
-                                            lock.insert(foreign_ip.to_string(), "Loading...".to_string());
+                                            lock.insert(
+                                                foreign_ip.to_string(),
+                                                "Loading...".to_string(),
+                                            );
                                         }
-                                        
-                                        app.recent_events.push(lazyifconfig::model::NetworkEvent::new(
-                                            lazyifconfig::model::NetworkEventKind::ActionWhois,
-                                            lazyifconfig::model::EventSeverity::Info,
-                                            format!("Starting WHOIS lookup for {}", foreign_ip),
-                                        ));
+
+                                        app.recent_events.push(
+                                            lazyifconfig::model::NetworkEvent::new(
+                                                lazyifconfig::model::NetworkEventKind::ActionWhois,
+                                                lazyifconfig::model::EventSeverity::Info,
+                                                format!("Starting WHOIS lookup for {}", foreign_ip),
+                                            ),
+                                        );
                                         if app.recent_events.len() > 100 {
                                             let overflow = app.recent_events.len() - 100;
                                             app.recent_events.drain(0..overflow);
                                         }
-                                        
+
                                         let cache_clone = app.whois_cache.clone();
                                         let ip_clone = foreign_ip.to_string();
-                                        
+
                                         tokio::spawn(async move {
-                                            let result = match lazyifconfig::command::run_whois(&ip_clone) {
-                                                Ok(out) => out,
-                                                Err(e) => format!("Error running whois: {}", e),
-                                            };
+                                            let result =
+                                                match lazyifconfig::command::run_whois(&ip_clone) {
+                                                    Ok(out) => out,
+                                                    Err(e) => format!("Error running whois: {}", e),
+                                                };
                                             if let Ok(mut lock) = cache_clone.lock() {
                                                 lock.insert(ip_clone, result);
                                             }
@@ -879,6 +1145,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn route_path_lookup_requires_destination() {
+        let mut app = App::default();
+        app.route_inspector.destination_input = "   ".to_string();
+        app.route_inspector.latest_path_result = Some(lazyifconfig::model::RoutePathResult {
+            destination: "8.8.8.8".to_string(),
+            ..Default::default()
+        });
+
+        run_route_path_lookup(&mut app);
+
+        assert!(app.route_inspector.latest_path_result.is_none());
+        assert_eq!(
+            app.route_inspector.latest_path_error.as_deref(),
+            Some("Enter a destination first.")
+        );
+    }
+
+    #[test]
+    fn routes_raw_sources_include_available_optional_outputs_in_order() {
+        let mut app = App::default();
+        app.command_outputs.insert(
+            CommandSourceId::RoutePath,
+            CommandOutput {
+                command: "ip route get 8.8.8.8".to_string(),
+                stdout: String::new(),
+                stderr: String::new(),
+                executed_at: SystemTime::now(),
+                exit_code: Some(0),
+            },
+        );
+        app.command_outputs.insert(
+            CommandSourceId::Ipv6Routes,
+            CommandOutput {
+                command: "ip -6 route show".to_string(),
+                stdout: String::new(),
+                stderr: String::new(),
+                executed_at: SystemTime::now(),
+                exit_code: Some(0),
+            },
+        );
+
+        assert_eq!(
+            routes_raw_sources(&app),
+            vec![
+                CommandSourceId::NetstatRoutes,
+                CommandSourceId::DefaultRoute,
+                CommandSourceId::Ipv6Routes,
+                CommandSourceId::RoutePath,
+            ]
+        );
+    }
 
     #[tokio::test]
     async fn test_tick_update() {
