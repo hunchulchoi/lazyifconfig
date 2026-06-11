@@ -328,11 +328,13 @@ fn run_route_path_lookup(app: &mut App) {
         }
         Err(error) => {
             app.route_inspector.latest_path_result = None;
-            app.route_inspector.latest_path_error = Some(format!(
-                "{destination} could not be resolved by route command: {error}"
-            ));
+            app.route_inspector.latest_path_error = Some(route_path_command_error_message(&error));
         }
     }
+}
+
+fn route_path_command_error_message(error: &str) -> String {
+    format!("destination could not be resolved by route command: {error}")
 }
 
 fn routes_raw_sources(app: &App) -> Vec<CommandSourceId> {
@@ -1161,6 +1163,14 @@ mod tests {
         assert_eq!(
             app.route_inspector.latest_path_error.as_deref(),
             Some("Enter a destination first.")
+        );
+    }
+
+    #[test]
+    fn route_path_command_error_message_uses_literal_destination_label() {
+        assert_eq!(
+            route_path_command_error_message("lookup failed"),
+            "destination could not be resolved by route command: lookup failed"
         );
     }
 
