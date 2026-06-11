@@ -345,8 +345,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
             }
             NavigationItem::Connection {
                 proto,
-                local,
-                foreign,
+                local_ip,
+                local_port,
+                foreign_ip,
+                foreign_port,
                 state,
                 ..
             } => {
@@ -357,8 +359,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 let text = format!(
                     "[{}] {} -> {}{}",
                     proto.to_uppercase(),
-                    local,
-                    foreign,
+                    format_endpoint(local_ip, local_port),
+                    format_endpoint(foreign_ip, foreign_port),
                     state_str
                 );
                 list_items.push(ListItem::new(text).style(style));
@@ -668,8 +670,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
             }
             NavigationItem::Connection {
                 proto,
-                local,
-                foreign,
+                local_ip,
+                local_port,
+                foreign_ip,
+                foreign_port,
                 state,
                 index: _,
             } => {
@@ -677,16 +681,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 details_text.push_str("=== Active Connection Details ===\n\n");
                 details_text.push_str(&format!("Protocol:             {}\n", proto.to_uppercase()));
 
-                let local_parts: Vec<&str> = local.split(':').collect();
-                let local_ip = local_parts[0];
-                let local_port = local_parts.get(1).unwrap_or(&"*");
-
                 details_text.push_str(&format!("Local IP Address:     {}\n", local_ip));
                 details_text.push_str(&format!("Local Port:           {}\n", local_port));
-
-                let foreign_parts: Vec<&str> = foreign.split(':').collect();
-                let foreign_ip = foreign_parts[0];
-                let foreign_port = foreign_parts.get(1).unwrap_or(&"*");
 
                 details_text.push_str(&format!("Foreign IP Address:   {}\n", foreign_ip));
                 details_text.push_str(&format!("Foreign Port:         {}\n", foreign_port));
@@ -699,8 +695,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 let mut mapped_interface = "N/A (External/Wildcard)".to_string();
                 if let Some(snapshot) = &app.current_snapshot {
                     for interface in &snapshot.interfaces {
-                        let matches_ipv4 = interface.ipv4.iter().any(|addr| addr.value == local_ip);
-                        let matches_ipv6 = interface.ipv6.iter().any(|addr| addr.value == local_ip);
+                        let matches_ipv4 =
+                            interface.ipv4.iter().any(|addr| addr.value == *local_ip);
+                        let matches_ipv6 =
+                            interface.ipv6.iter().any(|addr| addr.value == *local_ip);
                         if matches_ipv4 || matches_ipv6 {
                             mapped_interface =
                                 format!("{} ({})", interface.name, interface.network_kind.as_str());
@@ -1223,13 +1221,15 @@ fn render_connections_table(frame: &mut Frame, app: &App, block: Block<'_>, area
         Cell::from(connection_header_label(
             app,
             ConnectionSortColumn::Local,
-            "Local",
+            "Local IP",
         )),
+        Cell::from("LPort"),
         Cell::from(connection_header_label(
             app,
             ConnectionSortColumn::Foreign,
-            "Foreign",
+            "Foreign IP",
         )),
+        Cell::from("FPort"),
         Cell::from(connection_header_label(
             app,
             ConnectionSortColumn::State,
@@ -1249,8 +1249,10 @@ fn render_connections_table(frame: &mut Frame, app: &App, block: Block<'_>, area
         .filter_map(|(idx, item)| {
             let NavigationItem::Connection {
                 proto,
-                local,
-                foreign,
+                local_ip,
+                local_port,
+                foreign_ip,
+                foreign_port,
                 state,
                 ..
             } = item
@@ -1269,8 +1271,10 @@ fn render_connections_table(frame: &mut Frame, app: &App, block: Block<'_>, area
             Some(
                 Row::new([
                     highlighted_filter_cell(proto.to_uppercase(), &app.connection_filter),
-                    highlighted_filter_cell(local.clone(), &app.connection_filter),
-                    highlighted_filter_cell(foreign.clone(), &app.connection_filter),
+                    highlighted_filter_cell(local_ip.clone(), &app.connection_filter),
+                    highlighted_filter_cell(local_port.clone(), &app.connection_filter),
+                    highlighted_filter_cell(foreign_ip.clone(), &app.connection_filter),
+                    highlighted_filter_cell(foreign_port.clone(), &app.connection_filter),
                     highlighted_filter_cell(
                         state.clone().unwrap_or_default(),
                         &app.connection_filter,
@@ -1284,9 +1288,11 @@ fn render_connections_table(frame: &mut Frame, app: &App, block: Block<'_>, area
         rows,
         [
             Constraint::Length(5),
-            Constraint::Percentage(34),
-            Constraint::Percentage(40),
             Constraint::Length(10),
+            Constraint::Length(5),
+            Constraint::Length(10),
+            Constraint::Length(5),
+            Constraint::Length(6),
         ],
     )
     .header(header)
@@ -1318,6 +1324,10 @@ fn connection_header_label(app: &App, column: ConnectionSortColumn, label: &str)
         SortDirection::Descending => "↓",
     };
     format!("{label} {arrow}")
+}
+
+fn format_endpoint(ip: &str, port: &str) -> String {
+    format!("{ip}:{port}")
 }
 
 fn highlighted_filter_cell(value: String, query: &str) -> Cell<'static> {
@@ -2267,8 +2277,10 @@ mod tests {
         app.view_mode = ViewMode::Connections;
         app.navigation_items = vec![NavigationItem::Connection {
             proto: "tcp".to_string(),
-            local: "127.0.0.1:5".to_string(),
-            foreign: "1.1.1.1:443".to_string(),
+            local_ip: "127.0.0.1".to_string(),
+            local_port: "5".to_string(),
+            foreign_ip: "1.1.1.1".to_string(),
+            foreign_port: "443".to_string(),
             state: Some("ESTAB".to_string()),
             index: 0,
         }];
@@ -2286,12 +2298,16 @@ mod tests {
         }
 
         assert!(left_pane.contains("Proto"));
-        assert!(left_pane.contains("Local ↑"));
-        assert!(left_pane.contains("Foreign"));
+        assert!(left_pane.contains("Local IP ↑"));
+        assert!(left_pane.contains("LPort"));
+        assert!(left_pane.contains("Foreign IP"));
+        assert!(left_pane.contains("FPort"));
         assert!(left_pane.contains("State"));
         assert!(left_pane.contains("TCP"));
-        assert!(left_pane.contains("127.0.0.1:5"));
-        assert!(left_pane.contains("1.1.1.1:443"));
+        assert!(left_pane.contains("127.0.0.1"));
+        assert!(left_pane.contains("5"));
+        assert!(left_pane.contains("1.1.1.1"));
+        assert!(left_pane.contains("443"));
         assert!(left_pane.contains("ESTAB"));
     }
 
@@ -2302,8 +2318,10 @@ mod tests {
         app.connection_filter = "1.1.1.1".to_string();
         app.navigation_items = vec![NavigationItem::Connection {
             proto: "tcp".to_string(),
-            local: "127.0.0.1:5".to_string(),
-            foreign: "1.1.1.1:443".to_string(),
+            local_ip: "127.0.0.1".to_string(),
+            local_port: "5".to_string(),
+            foreign_ip: "1.1.1.1".to_string(),
+            foreign_port: "443".to_string(),
             state: Some("ESTAB".to_string()),
             index: 0,
         }];

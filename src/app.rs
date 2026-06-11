@@ -58,8 +58,10 @@ pub enum NavigationItem {
     SubnetHeader(Subnet),
     Connection {
         proto: String,
-        local: String,
-        foreign: String,
+        local_ip: String,
+        local_port: String,
+        foreign_ip: String,
+        foreign_port: String,
         state: Option<String>,
         index: usize,
     },
@@ -553,12 +555,12 @@ impl App {
                     .iter()
                     .enumerate()
                     .filter_map(|(idx, c)| {
-                        let local = format!("{}:{}", c.local_ip, c.local_port);
-                        let foreign = format!("{}:{}", c.foreign_ip, c.foreign_port);
                         let matches_filter = query.is_empty()
                             || c.proto.to_lowercase().contains(&query)
-                            || local.to_lowercase().contains(&query)
-                            || foreign.to_lowercase().contains(&query)
+                            || c.local_ip.to_lowercase().contains(&query)
+                            || c.local_port.to_lowercase().contains(&query)
+                            || c.foreign_ip.to_lowercase().contains(&query)
+                            || c.foreign_port.to_lowercase().contains(&query)
                             || c.state
                                 .as_deref()
                                 .unwrap_or("")
@@ -566,15 +568,17 @@ impl App {
                                 .contains(&query);
 
                         if matches_filter {
-                            Some((idx, c, local, foreign))
+                            Some((idx, c))
                         } else {
                             None
                         }
                     })
-                    .map(|(idx, c, local, foreign)| NavigationItem::Connection {
+                    .map(|(idx, c)| NavigationItem::Connection {
                         proto: c.proto.clone(),
-                        local,
-                        foreign,
+                        local_ip: c.local_ip.clone(),
+                        local_port: c.local_port.clone(),
+                        foreign_ip: c.foreign_ip.clone(),
+                        foreign_port: c.foreign_port.clone(),
                         state: c.state.clone(),
                         index: idx,
                     })
@@ -1013,15 +1017,19 @@ fn compare_connection_items(
     let (
         NavigationItem::Connection {
             proto: proto_a,
-            local: local_a,
-            foreign: foreign_a,
+            local_ip: local_ip_a,
+            local_port: local_port_a,
+            foreign_ip: foreign_ip_a,
+            foreign_port: foreign_port_a,
             state: state_a,
             ..
         },
         NavigationItem::Connection {
             proto: proto_b,
-            local: local_b,
-            foreign: foreign_b,
+            local_ip: local_ip_b,
+            local_port: local_port_b,
+            foreign_ip: foreign_ip_b,
+            foreign_port: foreign_port_b,
             state: state_b,
             ..
         },
@@ -1033,15 +1041,19 @@ fn compare_connection_items(
     let state_a = state_a.as_deref().unwrap_or("");
     let state_b = state_b.as_deref().unwrap_or("");
     let primary = match column {
-        ConnectionSortColumn::Local => compare_text(local_a, local_b),
-        ConnectionSortColumn::Foreign => compare_text(foreign_a, foreign_b),
+        ConnectionSortColumn::Local => compare_text(local_ip_a, local_ip_b)
+            .then_with(|| compare_numeric_text(local_port_a, local_port_b)),
+        ConnectionSortColumn::Foreign => compare_text(foreign_ip_a, foreign_ip_b)
+            .then_with(|| compare_numeric_text(foreign_port_a, foreign_port_b)),
         ConnectionSortColumn::State => compare_text(state_a, state_b),
         ConnectionSortColumn::Proto => compare_text(proto_a, proto_b),
     };
 
     primary
-        .then_with(|| compare_text(local_a, local_b))
-        .then_with(|| compare_text(foreign_a, foreign_b))
+        .then_with(|| compare_text(local_ip_a, local_ip_b))
+        .then_with(|| compare_numeric_text(local_port_a, local_port_b))
+        .then_with(|| compare_text(foreign_ip_a, foreign_ip_b))
+        .then_with(|| compare_numeric_text(foreign_port_a, foreign_port_b))
         .then_with(|| compare_text(state_a, state_b))
         .then_with(|| compare_text(proto_a, proto_b))
 }

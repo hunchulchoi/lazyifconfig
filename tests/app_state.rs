@@ -208,16 +208,26 @@ fn connections_filter_then_sort_by_local_address() {
         ),
     ]));
 
-    let locals: Vec<String> = app
+    let locals: Vec<(String, String)> = app
         .navigation_items
         .iter()
         .map(|item| match item {
-            lazyifconfig::app::NavigationItem::Connection { local, .. } => local.clone(),
+            lazyifconfig::app::NavigationItem::Connection {
+                local_ip,
+                local_port,
+                ..
+            } => (local_ip.clone(), local_port.clone()),
             other => panic!("expected connection item, got {other:?}"),
         })
         .collect();
 
-    assert_eq!(locals, vec!["127.0.0.1:8080", "127.0.0.1:9000"]);
+    assert_eq!(
+        locals,
+        vec![
+            ("127.0.0.1".to_string(), "8080".to_string()),
+            ("127.0.0.1".to_string(), "9000".to_string())
+        ]
+    );
 }
 
 #[test]
@@ -255,10 +265,14 @@ fn connections_sort_column_cycles_and_direction_toggles() {
 
     app.update_navigation_items();
     let first_foreign = match &app.navigation_items[0] {
-        lazyifconfig::app::NavigationItem::Connection { foreign, .. } => foreign.as_str(),
+        lazyifconfig::app::NavigationItem::Connection {
+            foreign_ip,
+            foreign_port,
+            ..
+        } => (foreign_ip.as_str(), foreign_port.as_str()),
         other => panic!("expected connection item, got {other:?}"),
     };
-    assert_eq!(first_foreign, "1.1.1.1:443");
+    assert_eq!(first_foreign, ("1.1.1.1", "443"));
 
     app.toggle_connection_sort_direction();
     assert_eq!(
@@ -268,10 +282,14 @@ fn connections_sort_column_cycles_and_direction_toggles() {
 
     app.update_navigation_items();
     let first_foreign = match &app.navigation_items[0] {
-        lazyifconfig::app::NavigationItem::Connection { foreign, .. } => foreign.as_str(),
+        lazyifconfig::app::NavigationItem::Connection {
+            foreign_ip,
+            foreign_port,
+            ..
+        } => (foreign_ip.as_str(), foreign_port.as_str()),
         other => panic!("expected connection item, got {other:?}"),
     };
-    assert_eq!(first_foreign, "9.9.9.9:443");
+    assert_eq!(first_foreign, ("9.9.9.9", "443"));
 }
 
 #[test]

@@ -893,14 +893,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('c') | KeyCode::Char('ㅊ') => {
                         app.help_visible = false;
                         if app.view_mode == ViewMode::Connections {
-                            if let Some(NavigationItem::Connection { foreign, .. }) =
+                            if let Some(NavigationItem::Connection { foreign_ip, .. }) =
                                 app.navigation_items.get(app.selected_index)
                             {
-                                let foreign_ip = if let Some(pos) = foreign.rfind(':') {
-                                    &foreign[..pos]
-                                } else {
-                                    foreign.as_str()
-                                };
                                 if foreign_ip != "*"
                                     && foreign_ip != "::"
                                     && foreign_ip != "0.0.0.0"
@@ -942,14 +937,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('w') | KeyCode::Char('ㅈ') => {
                         app.help_visible = false;
                         if app.view_mode == ViewMode::Connections {
-                            if let Some(NavigationItem::Connection { foreign, .. }) =
+                            if let Some(NavigationItem::Connection { foreign_ip, .. }) =
                                 app.navigation_items.get(app.selected_index)
                             {
-                                let foreign_ip = if let Some(pos) = foreign.rfind(':') {
-                                    &foreign[..pos]
-                                } else {
-                                    foreign.as_str()
-                                };
                                 if foreign_ip != "*"
                                     && foreign_ip != "::"
                                     && foreign_ip != "0.0.0.0"
