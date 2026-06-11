@@ -363,6 +363,13 @@ fn routes_raw_sources(app: &App) -> Vec<CommandSourceId> {
     sources
 }
 
+fn raw_viewer_command_to_copy(app: &App, src_id: CommandSourceId) -> String {
+    app.command_outputs
+        .get(&src_id)
+        .map(|out| out.command.clone())
+        .unwrap_or_else(|| src_id.as_str().to_string())
+}
+
 fn maybe_start_auto_update_check(app: &mut App) {
     let is_busy = matches!(
         app.update_status,
@@ -714,12 +721,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if let Some(&src_id) =
                                     app.raw_viewer.sources.get(app.raw_viewer.selected_index)
                                 {
-                                    let _ =
-                                        lazyifconfig::command::copy_to_clipboard(src_id.as_str());
+                                    let command = raw_viewer_command_to_copy(&app, src_id);
+                                    let _ = lazyifconfig::command::copy_to_clipboard(&command);
                                     app.recent_events.push(NetworkEvent::new(
                                         NetworkEventKind::ActionCopied,
                                         EventSeverity::Info,
-                                        format!("Copied command: {}", src_id.as_str()),
+                                        format!("Copied command: {command}"),
                                     ));
                                 }
                             }
@@ -1206,6 +1213,30 @@ mod tests {
                 CommandSourceId::Ipv6Routes,
                 CommandSourceId::RoutePath,
             ]
+        );
+    }
+
+    #[test]
+    fn raw_viewer_command_to_copy_prefers_captured_command_and_falls_back_to_source_label() {
+        let mut app = App::default();
+        app.command_outputs.insert(
+            CommandSourceId::RoutePath,
+            CommandOutput {
+                command: "ip route get 8.8.8.8".to_string(),
+                stdout: String::new(),
+                stderr: String::new(),
+                executed_at: SystemTime::now(),
+                exit_code: Some(0),
+            },
+        );
+
+        assert_eq!(
+            raw_viewer_command_to_copy(&app, CommandSourceId::RoutePath),
+            "ip route get 8.8.8.8"
+        );
+        assert_eq!(
+            raw_viewer_command_to_copy(&app, CommandSourceId::Ifconfig),
+            CommandSourceId::Ifconfig.as_str()
         );
     }
 
