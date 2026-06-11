@@ -35,7 +35,7 @@ jobs:
 
           if [[ -n "${INPUT_TAG}" ]]; then
             raw_tag="${INPUT_TAG}"
-          elif [[ -n "${HEAD_BRANCH}" ]]; then
+          elif [[ "${HEAD_BRANCH}" == v* ]]; then
             raw_tag="${HEAD_BRANCH}"
           else
             raw_tag="$(
